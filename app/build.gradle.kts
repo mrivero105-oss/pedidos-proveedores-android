@@ -4,10 +4,10 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
 }
 
-val releaseKeystorePath: String? = System.getenv("SIGNING_KEYSTORE_PATH")
-val releaseKeystorePassword: String? = System.getenv("SIGNING_KEYSTORE_PASSWORD")
-val releaseKeyAlias: String? = System.getenv("SIGNING_KEY_ALIAS")
-val releaseKeyPassword: String? = System.getenv("SIGNING_KEY_PASSWORD")
+val releaseKeystorePath: String? = System.getenv("SIGNING_KEYSTORE_PATH")?.trim()
+val releaseKeystorePassword: String? = System.getenv("SIGNING_KEYSTORE_PASSWORD")?.trim()
+val releaseKeyAlias: String? = System.getenv("SIGNING_KEY_ALIAS")?.trim()
+val releaseKeyPassword: String? = System.getenv("SIGNING_KEY_PASSWORD")?.trim()
 val hasReleaseSigning = !releaseKeystorePath.isNullOrBlank() &&
   !releaseKeystorePassword.isNullOrBlank() &&
   !releaseKeyAlias.isNullOrBlank() &&
