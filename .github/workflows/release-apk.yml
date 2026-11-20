@@ -62,24 +62,55 @@ jobs:
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_PASSWORD_RAW: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS_RAW: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD_RAW: ${{ secrets.KEY_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             printf '%s' "$KEYSTORE_BASE64" | tr -d ' \t\r\n' | base64 --decode > "${RUNNER_TEMP}/release.jks"
-            STORE_PASS=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d '\r\n')
-            ALIAS_CANDIDATE=$(printf '%s' "$KEY_ALIAS_RAW" | tr -d '\r\n' | xargs)
+            STORE_PASS=$(printf '%s' "$KEYSTORE_PASSWORD_RAW" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            # Si se copió accidentalmente la línea completa "KEYSTORE_PASSWORD=valor", probar también la parte derecha
+            if ! keytool -list -keystore "${RUNNER_TEMP}/release.jks" -storepass "$STORE_PASS" >/dev/null 2>&1; then
+              if [[ "$STORE_PASS" == *"="* ]]; then
+                ALT_PASS="${STORE_PASS#*=}"
+                if keytool -list -keystore "${RUNNER_TEMP}/release.jks" -storepass "$ALT_PASS" >/dev/null 2>&1; then
+                  STORE_PASS="$ALT_PASS"
+                fi
+              fi
+            fi
+
+            KT_LIST=$(keytool -list -keystore "${RUNNER_TEMP}/release.jks" -storepass "$STORE_PASS" 2>&1) || {
+              echo "::error::No se pudo abrir release.jks con KEYSTORE_PASSWORD (tamaño JKS: $(wc -c < "${RUNNER_TEMP}/release.jks") bytes)."
+              exit 1
+            }
+
+            ALIAS_CANDIDATE=$(printf '%s' "$KEY_ALIAS_RAW" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            ALIAS_CANDIDATE="${ALIAS_CANDIDATE#KEY_ALIAS=}"
             if [ -n "$ALIAS_CANDIDATE" ] && keytool -list -keystore "${RUNNER_TEMP}/release.jks" -storepass "$STORE_PASS" -alias "$ALIAS_CANDIDATE" >/dev/null 2>&1; then
               RESOLVED_ALIAS="$ALIAS_CANDIDATE"
             else
-              RESOLVED_ALIAS=$(keytool -list -keystore "${RUNNER_TEMP}/release.jks" -storepass "$STORE_PASS" 2>/dev/null | awk -F',' '/PrivateKeyEntry/{gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1; exit}')
+              RESOLVED_ALIAS=$(printf '%s\n' "$KT_LIST" | awk -F',' '/PrivateKeyEntry/{gsub(/^[ \t]+|[ \t]+$/, "", $1); if (!found) { print $1; found=1 }}')
             fi
+
             if [ -z "$RESOLVED_ALIAS" ]; then
-              RESOLVED_ALIAS="pedidos-release"
+              echo "::error::No se encontró ninguna entrada PrivateKeyEntry dentro de release.jks."
+              exit 1
             fi
+
+            KEY_PASS=$(printf '%s' "$KEY_PASSWORD_RAW" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            KEY_PASS="${KEY_PASS#KEY_PASSWORD=}"
+            if [ -z "$KEY_PASS" ]; then
+              KEY_PASS="$STORE_PASS"
+            fi
+
+            echo "::add-mask::${STORE_PASS}"
+            echo "::add-mask::${KEY_PASS}"
+            echo "Keystore verificado correctamente (alias detectado: ${RESOLVED_ALIAS})."
             echo "signed=true" >> "$GITHUB_OUTPUT"
             echo "keystore_path=${RUNNER_TEMP}/release.jks" >> "$GITHUB_OUTPUT"
+            echo "store_password=${STORE_PASS}" >> "$GITHUB_OUTPUT"
             echo "key_alias=${RESOLVED_ALIAS}" >> "$GITHUB_OUTPUT"
+            echo "key_password=${KEY_PASS}" >> "$GITHUB_OUTPUT"
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
@@ -92,9 +123,9 @@ jobs:
           APP_VERSION_CODE: ${{ steps.version.outputs.version_code }}
           OTA_GITHUB_REPO: ${{ github.repository }}
           SIGNING_KEYSTORE_PATH: ${{ steps.signing.outputs.keystore_path }}
-          SIGNING_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SIGNING_KEYSTORE_PASSWORD: ${{ steps.signing.outputs.store_password }}
           SIGNING_KEY_ALIAS: ${{ steps.signing.outputs.key_alias }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.KEYSTORE_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ steps.signing.outputs.key_password }}
         run: |
           if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
             ./gradlew assembleRelease --no-daemon
