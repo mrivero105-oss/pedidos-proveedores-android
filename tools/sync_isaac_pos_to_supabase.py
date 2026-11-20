@@ -677,7 +677,10 @@ def supabase_rest_request(
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("apikey", service_key)
-    req.add_header("Authorization", f"Bearer {service_key}")
+    # Claves legacy service_role (JWT eyJ...) requieren Authorization: Bearer;
+    # las claves modernas sb_secret_... se autentican solo con el header apikey.
+    if service_key.startswith("eyJ"):
+        req.add_header("Authorization", f"Bearer {service_key}")
     req.add_header("Content-Type", "application/json")
     if prefer:
         req.add_header("Prefer", prefer)
