@@ -1,5 +1,6 @@
 package com.pedidos.proveedores.domain.parser
 
+import com.pedidos.proveedores.data.local.AiSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -53,5 +54,13 @@ class GeminiResponseParserTest {
     assertEquals("HAR-01", items[1].codigo)
     assertEquals(22.5, items[1].precio!!, 0.001)
     assertEquals(5, items[1].paginaPdf)
+  }
+
+  @Test
+  fun migratesRetiredGemini25ModelsToLatestAliases() {
+    assertEquals("gemini-flash-latest", AiSettings.migrateLegacyModel("gemini-2.5-flash"))
+    assertEquals("gemini-flash-lite-latest", AiSettings.migrateLegacyModel("gemini-2.5-flash-lite"))
+    assertEquals("gemini-flash-lite-latest", AiSettings.migrateLegacyModel(""))
+    assertEquals("gemini-3.5-flash-lite", AiSettings.migrateLegacyModel("gemini-3.5-flash-lite"))
   }
 }

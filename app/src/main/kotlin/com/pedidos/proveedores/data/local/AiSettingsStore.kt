@@ -13,11 +13,22 @@ data class AiSettings(
     get() = geminiApiKey.isNotBlank()
 
   companion object {
-    const val DEFAULT_MODEL = "gemini-2.5-flash"
+    const val DEFAULT_MODEL = "gemini-flash-lite-latest"
     val AVAILABLE_MODELS = listOf(
-      "gemini-2.5-flash" to "Gemini 2.5 Flash (Máxima precisión · gratis)",
-      "gemini-2.5-flash-lite" to "Gemini 2.5 Flash-Lite (Más rápido · mayor cuota gratis)",
+      "gemini-flash-lite-latest" to "Gemini Flash-Lite Latest (Recomendado · rápido y mayor cuota gratis)",
+      "gemini-flash-latest" to "Gemini Flash Latest (Máxima precisión · siempre actualizado)",
+      "gemini-3.5-flash-lite" to "Gemini 3.5 Flash-Lite (Estable · gratis)",
     )
+
+    fun migrateLegacyModel(raw: String?): String {
+      val trimmed = raw?.trim().orEmpty()
+      return when {
+        trimmed.isBlank() -> DEFAULT_MODEL
+        trimmed.equals("gemini-2.5-flash", ignoreCase = true) -> "gemini-flash-latest"
+        trimmed.equals("gemini-2.5-flash-lite", ignoreCase = true) -> "gemini-flash-lite-latest"
+        else -> trimmed
+      }
+    }
   }
 }
 
@@ -32,14 +43,21 @@ class AiSettingsStore(context: Context) {
   private val _settings = MutableStateFlow(load())
   val settings: StateFlow<AiSettings> = _settings.asStateFlow()
 
-  private fun load(): AiSettings = AiSettings(
-    geminiApiKey = prefs.getString(KEY_API_KEY, "").orEmpty(),
-    geminiModel = prefs.getString(KEY_MODEL, AiSettings.DEFAULT_MODEL) ?: AiSettings.DEFAULT_MODEL,
-  )
+  private fun load(): AiSettings {
+    val rawModel = prefs.getString(KEY_MODEL, AiSettings.DEFAULT_MODEL)
+    val migratedModel = AiSettings.migrateLegacyModel(rawModel)
+    if (rawModel != null && migratedModel != rawModel) {
+      prefs.edit().putString(KEY_MODEL, migratedModel).apply()
+    }
+    return AiSettings(
+      geminiApiKey = prefs.getString(KEY_API_KEY, "").orEmpty(),
+      geminiModel = migratedModel,
+    )
+  }
 
   fun save(apiKey: String, model: String) {
     val cleanKey = apiKey.trim()
-    val cleanModel = model.trim().ifBlank { AiSettings.DEFAULT_MODEL }
+    val cleanModel = AiSettings.migrateLegacyModel(model)
     prefs.edit()
       .putString(KEY_API_KEY, cleanKey)
       .putString(KEY_MODEL, cleanModel)

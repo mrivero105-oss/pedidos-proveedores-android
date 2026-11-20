@@ -1,5 +1,6 @@
 package com.pedidos.proveedores.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Visibility
@@ -57,7 +60,10 @@ fun AiSettingsDialog(
     icon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
     title = { Text("IA Gratuita (Gemini Vision)") },
     text = {
-      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+      Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.verticalScroll(rememberScrollState()),
+      ) {
         Surface(
           color = MaterialTheme.colorScheme.surfaceVariant,
           shape = RoundedCornerShape(12.dp),
@@ -78,7 +84,7 @@ fun AiSettingsDialog(
           value = apiKey,
           onValueChange = { apiKey = it },
           label = { Text("Clave API de Gemini") },
-          placeholder = { Text("AIza...") },
+          placeholder = { Text("AIza... o AQ....") },
           singleLine = true,
           visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
           trailingIcon = {
@@ -96,7 +102,9 @@ fun AiSettingsDialog(
         AiSettings.AVAILABLE_MODELS.forEach { (modelId, label) ->
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+              .fillMaxWidth()
+              .clickable { selectedModel = modelId },
           ) {
             RadioButton(
               selected = selectedModel == modelId,

@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.util.Base64
+import com.pedidos.proveedores.data.local.AiSettings
 import com.pedidos.proveedores.domain.model.ProductoImportado
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -28,6 +29,17 @@ class GeminiCatalogExtractor {
     val advertencia: String? = null,
   )
 
+  private val fallbackModels = listOf(
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
+  )
+
+  private fun candidateModelsFor(requestedModel: String): List<String> {
+    val primary = AiSettings.migrateLegacyModel(requestedModel)
+    return (listOf(primary) + fallbackModels).distinct()
+  }
+
   suspend fun testConnection(apiKey: String, model: String): Result<String> = withContext(Dispatchers.IO) {
     runCatching {
       val cleanKey = apiKey.trim()
@@ -45,9 +57,24 @@ class GeminiCatalogExtractor {
         )
       }
 
-      val text = postGenerateContent(cleanKey, model, body)
-      if (text.isBlank()) error("Respuesta vacía de Gemini.")
-      "Conexión exitosa con $model"
+      val candidates = candidateModelsFor(model)
+      var lastError: Throwable? = null
+      for ((idx, candidate) in candidates.withIndex()) {
+        try {
+          val text = postGenerateContent(cleanKey, candidate, body)
+          if (text.isBlank()) error("Respuesta vacía de Gemini.")
+          return@runCatching if (idx == 0) {
+            "Conexión exitosa con $candidate"
+          } else {
+            "Conexión exitosa con $candidate (respaldo automático por saturación temporal de ${candidates.first()})"
+          }
+        } catch (e: ModelUnavailableException) {
+          lastError = e
+        } catch (e: TransientGeminiException) {
+          lastError = e
+        }
+      }
+      throw (lastError ?: IllegalStateException("No se pudo conectar con ningún modelo Gemini disponible."))
     }
   }
 
@@ -233,20 +260,29 @@ class GeminiCatalogExtractor {
     model: String,
     pageImages: List<Pair<Int, String>>,
   ): Result<String> {
+    val payload = buildBatchRequestPayload(pageImages)
+    val candidates = candidateModelsFor(model)
     var lastError: Throwable? = null
-    for (attempt in 0..2) {
-      try {
-        val payload = buildBatchRequestPayload(pageImages)
-        val responseText = postGenerateContent(apiKey, model, payload)
-        return Result.success(responseText)
-      } catch (e: RateLimitException) {
-        lastError = e
-        delay((attempt + 1) * 4000L)
-      } catch (e: Exception) {
-        return Result.failure(e)
+
+    for (candidate in candidates) {
+      for (attempt in 0..1) {
+        try {
+          val responseText = postGenerateContent(apiKey, candidate, payload)
+          return Result.success(responseText)
+        } catch (e: ModelUnavailableException) {
+          lastError = e
+          break // Pasar inmediatamente al siguiente modelo de respaldo
+        } catch (e: TransientGeminiException) {
+          lastError = e
+          if (attempt == 0) {
+            delay(3000L)
+          }
+        } catch (e: Exception) {
+          return Result.failure(e)
+        }
       }
     }
-    return Result.failure(lastError ?: IllegalStateException("Límite de solicitudes de Gemini alcanzado."))
+    return Result.failure(lastError ?: IllegalStateException("Límite o alta demanda temporal de Gemini alcanzada."))
   }
 
   private fun buildBatchRequestPayload(pageImages: List<Pair<Int, String>>): JSONObject {
@@ -339,8 +375,17 @@ class GeminiCatalogExtractor {
       val stream = if (status in 200..299) conn.inputStream else conn.errorStream
       val rawResponse = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
 
-      if (status == 429) {
-        throw RateLimitException("Cuota temporal de Gemini alcanzada (HTTP 429).")
+      if (status == 429 || status == 503) {
+        throw TransientGeminiException(
+          if (status == 429) "Cuota temporal de Gemini alcanzada (HTTP 429)."
+          else "Alta demanda temporal en $model (HTTP 503)."
+        )
+      }
+      if (status == 404) {
+        val apiError = runCatching {
+          JSONObject(rawResponse).optJSONObject("error")?.optString("message")
+        }.getOrNull()
+        throw ModelUnavailableException(apiError?.ifBlank { null } ?: "Modelo $model no disponible (HTTP 404).")
       }
       if (status !in 200..299) {
         val apiError = runCatching {
@@ -364,5 +409,6 @@ class GeminiCatalogExtractor {
     }
   }
 
-  private class RateLimitException(message: String) : Exception(message)
+  private class TransientGeminiException(message: String) : Exception(message)
+  private class ModelUnavailableException(message: String) : Exception(message)
 }
