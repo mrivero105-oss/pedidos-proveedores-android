@@ -1,0 +1,414 @@
+package com.pedidos.proveedores
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.rounded.ShoppingCartCheckout
+import androidx.compose.material.icons.rounded.Storefront
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.ui.NavDisplay
+import com.pedidos.proveedores.domain.model.Pedido
+import com.pedidos.proveedores.domain.model.PedidoEstado
+import com.pedidos.proveedores.domain.whatsapp.WhatsAppOrderFormatter
+import com.pedidos.proveedores.domain.whatsapp.WhatsAppSender
+import com.pedidos.proveedores.ui.AppViewModel
+import com.pedidos.proveedores.ui.OtaUiState
+import com.pedidos.proveedores.ui.components.AiSettingsDialog
+import com.pedidos.proveedores.ui.components.OtaUpdateDialog
+import com.pedidos.proveedores.ui.components.WhatsAppPreviewDialog
+import com.pedidos.proveedores.ui.screens.HistorialPedidosScreen
+import com.pedidos.proveedores.ui.screens.ImportarCatalogoScreen
+import com.pedidos.proveedores.ui.screens.IsaacPosSyncScreen
+import com.pedidos.proveedores.ui.screens.NuevoPedidoScreen
+import com.pedidos.proveedores.ui.screens.PedidoDetalleScreen
+import com.pedidos.proveedores.ui.screens.ProveedorDetalleScreen
+import com.pedidos.proveedores.ui.screens.ProveedoresScreen
+import com.pedidos.proveedores.ui.screens.VisorImagenScreen
+import com.pedidos.proveedores.ui.screens.VisorPdfScreen
+
+private const val TAB_PROVEEDORES = 0
+private const val TAB_NUEVO_PEDIDO = 1
+private const val TAB_HISTORIAL = 2
+
+@Composable
+fun MainNavigation(viewModel: AppViewModel) {
+  val context = LocalContext.current
+  val backStack = rememberNavBackStack(HomeRoute)
+  var selectedTab by rememberSaveable { mutableIntStateOf(TAB_PROVEEDORES) }
+
+  val proveedores by viewModel.proveedoresResumen.collectAsState()
+  val productos by viewModel.productos.collectAsState()
+  val catalogos by viewModel.catalogos.collectAsState()
+  val pedidos by viewModel.pedidos.collectAsState()
+  val importState by viewModel.importState.collectAsState()
+  val orderDraft by viewModel.orderDraft.collectAsState()
+  val snackbarMessage by viewModel.snackbarMessage.collectAsState()
+  val aiSettings by viewModel.aiSettings.collectAsState()
+  val aiTestRunning by viewModel.aiTestRunning.collectAsState()
+  val aiTestFeedback by viewModel.aiTestFeedback.collectAsState()
+  val otaSettings by viewModel.otaSettings.collectAsState()
+  val otaState by viewModel.otaState.collectAsState()
+  val isaacPosSettings by viewModel.isaacPosSettings.collectAsState()
+  val isaacPosState by viewModel.isaacPosState.collectAsState()
+  val isaacPosProductos by viewModel.isaacPosProductos.collectAsState()
+
+  val snackbarHostState = remember { SnackbarHostState() }
+  var whatsAppDialogPedido by remember { mutableStateOf<Pair<Pedido, Boolean>?>(null) }
+  var showAiSettingsDialog by remember { mutableStateOf(false) }
+  var showOtaDialog by remember { mutableStateOf(false) }
+
+  val otaAvailableTag = when (val s = otaState) {
+    is OtaUiState.UpdateAvailable -> s.release.tagName
+    is OtaUiState.ReadyToInstall -> s.release.tagName
+    else -> null
+  }
+
+  LaunchedEffect(snackbarMessage) {
+    snackbarMessage?.let { msg ->
+      snackbarHostState.showSnackbar(msg)
+      viewModel.clearMessage()
+    }
+  }
+
+  Scaffold(
+    snackbarHost = { SnackbarHost(snackbarHostState) },
+  ) { outerPadding ->
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(outerPadding),
+    ) {
+      NavDisplay(
+        backStack = backStack,
+        onBack = { backStack.removeLastOrNull() },
+        entryProvider = entryProvider {
+          entry<HomeRoute> {
+            Scaffold(
+              bottomBar = {
+                NavigationBar {
+                  NavigationBarItem(
+                    selected = selectedTab == TAB_PROVEEDORES,
+                    onClick = { selectedTab = TAB_PROVEEDORES },
+                    icon = { Icon(Icons.Rounded.Storefront, contentDescription = null) },
+                    label = { Text("Proveedores") },
+                  )
+                  NavigationBarItem(
+                    selected = selectedTab == TAB_NUEVO_PEDIDO,
+                    onClick = { selectedTab = TAB_NUEVO_PEDIDO },
+                    icon = {
+                      BadgedBox(
+                        badge = {
+                          if (orderDraft.itemCount > 0) {
+                            Badge { Text(orderDraft.itemCount.toString()) }
+                          }
+                        }
+                      ) {
+                        Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
+                      }
+                    },
+                    label = { Text("Pedir") },
+                  )
+                  NavigationBarItem(
+                    selected = selectedTab == TAB_HISTORIAL,
+                    onClick = { selectedTab = TAB_HISTORIAL },
+                    icon = { Icon(Icons.AutoMirrored.Rounded.ReceiptLong, contentDescription = null) },
+                    label = { Text("Pedidos") },
+                  )
+                }
+              },
+            ) { homePadding ->
+              when (selectedTab) {
+                TAB_PROVEEDORES -> ProveedoresScreen(
+                  proveedores = proveedores,
+                  aiConfigured = aiSettings.isConfigured,
+                  isaacPosSyncedCount = isaacPosProductos.size,
+                  otaAvailableTag = otaAvailableTag,
+                  onOpenAiSettings = {
+                    viewModel.resetAiTestFeedback()
+                    showAiSettingsDialog = true
+                  },
+                  onOpenOtaDialog = { showOtaDialog = true },
+                  onOpenIsaacPos = { backStack.add(IsaacPosSyncRoute) },
+                  onSaveProveedor = { prov ->
+                    viewModel.saveProveedor(prov) { newId ->
+                      if (prov.id == 0L) {
+                        backStack.add(ProveedorDetalleRoute(newId))
+                      }
+                    }
+                  },
+                  onOpenProveedor = { id -> backStack.add(ProveedorDetalleRoute(id)) },
+                  onStartOrder = { id ->
+                    viewModel.startOrderForProveedor(id)
+                    selectedTab = TAB_NUEVO_PEDIDO
+                  },
+                  modifier = Modifier.padding(homePadding),
+                )
+
+                TAB_NUEVO_PEDIDO -> {
+                  val previewPedido = remember(orderDraft, proveedores, productos) {
+                    viewModel.buildCurrentPedido(PedidoEstado.BORRADOR)
+                  }
+                  NuevoPedidoScreen(
+                    proveedores = proveedores,
+                    allProductos = productos,
+                    allCatalogos = catalogos,
+                    draft = orderDraft,
+                    currentPedidoPreview = previewPedido,
+                    lowStockThreshold = isaacPosSettings.lowStockThreshold,
+                    onSelectProveedor = { viewModel.startOrderForProveedor(it) },
+                    onIncrementProduct = { viewModel.incrementProduct(it) },
+                    onDecrementProduct = { viewModel.decrementProduct(it) },
+                    onSetProductQuantityAndPrice = { prod, qty, price, saveToCatalog ->
+                      viewModel.setProductQuantityAndPrice(prod, qty, price, saveToCatalog)
+                    },
+                    onAddManualItem = { n, c, u, p -> viewModel.addManualItem(n, c, u, p) },
+                    onRemoveManualItem = { viewModel.removeManualItem(it) },
+                    onNotesChange = { viewModel.setOrderNotes(it) },
+                    onClearDraft = { viewModel.clearOrderDraft() },
+                    onOpenProveedorCatalog = { id -> backStack.add(ProveedorDetalleRoute(id)) },
+                    onOpenPdf = { ruta, titulo -> backStack.add(VisorPdfRoute(ruta, titulo)) },
+                    onSaveDraft = {
+                      viewModel.saveCurrentOrder(PedidoEstado.BORRADOR) {
+                        selectedTab = TAB_HISTORIAL
+                      }
+                    },
+                    onOpenWhatsAppPreview = {
+                      val pedido = viewModel.buildCurrentPedido(PedidoEstado.ENVIADO)
+                      if (pedido != null) {
+                        whatsAppDialogPedido = pedido to true
+                      } else {
+                        viewModel.showMessage("Agrega al menos un producto al pedido")
+                      }
+                    },
+                    onGoToProveedores = { selectedTab = TAB_PROVEEDORES },
+                    onPrefillLowStock = { viewModel.prefillLowStockForCurrentProveedor() },
+                    modifier = Modifier.padding(homePadding),
+                  )
+                }
+
+                TAB_HISTORIAL -> HistorialPedidosScreen(
+                  pedidos = pedidos,
+                  onOpenPedido = { id -> backStack.add(PedidoDetalleRoute(id)) },
+                  modifier = Modifier.padding(homePadding),
+                )
+              }
+            }
+          }
+
+          entry<ProveedorDetalleRoute> { route ->
+            val proveedor = proveedores.firstOrNull { it.proveedor.id == route.proveedorId }?.proveedor
+            val provCatalogs = catalogos.filter { it.proveedorId == route.proveedorId }
+            val provProducts = productos.filter { it.proveedorId == route.proveedorId }
+
+            ProveedorDetalleScreen(
+              proveedor = proveedor,
+              catalogos = provCatalogs,
+              productos = provProducts,
+              onBack = { backStack.removeLastOrNull() },
+              onUpdateProveedor = { viewModel.saveProveedor(it) },
+              onDeleteProveedor = {
+                viewModel.deleteProveedor(route.proveedorId) {
+                  backStack.removeLastOrNull()
+                }
+              },
+              onPickCatalogFile = { uri ->
+                viewModel.startCatalogImport(route.proveedorId, uri)
+                backStack.add(ImportarCatalogoRoute(route.proveedorId))
+              },
+              onPickCatalogImages = { uris ->
+                viewModel.startImagesImport(route.proveedorId, uris)
+                backStack.add(ImportarCatalogoRoute(route.proveedorId))
+              },
+              onOpenPdf = { ruta, titulo -> backStack.add(VisorPdfRoute(ruta, titulo)) },
+              onOpenImages = { rutas, titulo -> backStack.add(VisorImagenRoute(rutas, titulo)) },
+              onDeleteCatalogo = { catId, delProds -> viewModel.deleteCatalogo(catId, delProds) },
+              onSaveProducto = { prod, photoUri -> viewModel.saveProducto(prod, photoUri) },
+              onDeleteProducto = { viewModel.deleteProducto(it) },
+              onStartOrder = {
+                viewModel.startOrderForProveedor(route.proveedorId)
+                selectedTab = TAB_NUEVO_PEDIDO
+                while (backStack.size > 1) {
+                  backStack.removeLastOrNull()
+                }
+              },
+            )
+          }
+
+          entry<ImportarCatalogoRoute> {
+            ImportarCatalogoScreen(
+              state = importState,
+              aiConfigured = aiSettings.isConfigured,
+              onToggleItem = { viewModel.toggleImportedItem(it) },
+              onSelectAll = { viewModel.selectAllImported(it) },
+              onUpdateItem = { viewModel.updateImportedItem(it) },
+              onSetReplaceExisting = { viewModel.setReplaceExisting(it) },
+              onOpenPdfPreview = { ruta, titulo -> backStack.add(VisorPdfRoute(ruta, titulo)) },
+              onOpenImagesPreview = { rutas, titulo -> backStack.add(VisorImagenRoute(rutas, titulo)) },
+              onExtractWithAi = { viewModel.reExtractCurrentWithGemini() },
+              onOpenAiSettings = {
+                viewModel.resetAiTestFeedback()
+                showAiSettingsDialog = true
+              },
+              onConfirmImport = {
+                viewModel.confirmCatalogImport {
+                  backStack.removeLastOrNull()
+                }
+              },
+              onCancel = {
+                viewModel.cancelCatalogImport()
+                backStack.removeLastOrNull()
+              },
+            )
+          }
+
+          entry<VisorPdfRoute> { route ->
+            VisorPdfScreen(
+              rutaLocal = route.rutaLocal,
+              titulo = route.titulo,
+              onBack = { backStack.removeLastOrNull() },
+            )
+          }
+
+          entry<VisorImagenRoute> { route ->
+            VisorImagenScreen(
+              rutas = route.rutas,
+              titulo = route.titulo,
+              onBack = { backStack.removeLastOrNull() },
+            )
+          }
+
+          entry<IsaacPosSyncRoute> {
+            IsaacPosSyncScreen(
+              settings = isaacPosSettings,
+              syncState = isaacPosState,
+              posProducts = isaacPosProductos,
+              localProveedores = proveedores,
+              localProductos = productos,
+              onBack = { backStack.removeLastOrNull() },
+              onSaveSettings = { url, key, low -> viewModel.saveIsaacPosSettings(url, key, low) },
+              onTestConnection = { url, key -> viewModel.testIsaacPosConnection(url, key) },
+              onSyncNow = { viewModel.syncIsaacPosNow() },
+              onAssignToProveedor = { provId, items -> viewModel.assignIsaacPosProductsToProveedor(provId, items) },
+              onCreateProveedorAndAssign = { prov, items -> viewModel.createProveedorAndAssignIsaacPos(prov, items) },
+            )
+          }
+
+          entry<PedidoDetalleRoute> { route ->
+            val pedido = pedidos.firstOrNull { it.id == route.pedidoId }
+            PedidoDetalleScreen(
+              pedido = pedido,
+              onBack = { backStack.removeLastOrNull() },
+              onUpdateEstado = { estado -> viewModel.updatePedidoEstado(route.pedidoId, estado) },
+              onOpenWhatsAppPreview = { p -> whatsAppDialogPedido = p to false },
+              onCopyOrderText = { p ->
+                val text = WhatsAppOrderFormatter.format(p, p.incluirPrecios)
+                WhatsAppSender.copyToClipboard(context, text)
+                viewModel.showMessage("Pedido copiado al portapapeles")
+              },
+              onEditDraft = { p ->
+                viewModel.loadPedidoIntoDraft(p, asDuplicate = false)
+                selectedTab = TAB_NUEVO_PEDIDO
+                while (backStack.size > 1) {
+                  backStack.removeLastOrNull()
+                }
+              },
+              onDuplicateOrder = { p ->
+                viewModel.loadPedidoIntoDraft(p, asDuplicate = true)
+                selectedTab = TAB_NUEVO_PEDIDO
+                while (backStack.size > 1) {
+                  backStack.removeLastOrNull()
+                }
+                viewModel.showMessage("Pedido duplicado en borrador")
+              },
+              onDelete = {
+                viewModel.deletePedido(route.pedidoId) {
+                  backStack.removeLastOrNull()
+                }
+              },
+            )
+          }
+        },
+      )
+    }
+  }
+
+  if (showAiSettingsDialog) {
+    AiSettingsDialog(
+      currentSettings = aiSettings,
+      testingConnection = aiTestRunning,
+      testFeedback = aiTestFeedback,
+      onTestConnection = { key, model -> viewModel.testGeminiConnection(key, model) },
+      onSave = { key, model -> viewModel.saveAiSettings(key, model) },
+      onClearKey = { viewModel.clearAiApiKey() },
+      onDismiss = { showAiSettingsDialog = false },
+    )
+  }
+
+  if (showOtaDialog) {
+    OtaUpdateDialog(
+      otaSettings = otaSettings,
+      otaState = otaState,
+      onSaveSettings = { slug, auto -> viewModel.saveOtaSettings(slug, auto) },
+      onCheckNow = { slug -> viewModel.checkForOtaUpdate(repoSlugOverride = slug, silent = false) },
+      onDownloadAndInstall = { viewModel.downloadAndInstallOta() },
+      onInstallDownloaded = { viewModel.installDownloadedOta() },
+      onDismiss = { showOtaDialog = false },
+    )
+  }
+
+  whatsAppDialogPedido?.let { (pedido, isFromDraft) ->
+    WhatsAppPreviewDialog(
+      pedido = pedido,
+      onDismiss = { whatsAppDialogPedido = null },
+      onCopy = { msg ->
+        WhatsAppSender.copyToClipboard(context, msg)
+        viewModel.showMessage("Mensaje copiado al portapapeles")
+      },
+      onSendWhatsApp = { msg, incluirPrecios ->
+        whatsAppDialogPedido = null
+        if (isFromDraft) {
+          viewModel.setOrderIncludePrices(incluirPrecios)
+          viewModel.saveCurrentOrder(PedidoEstado.ENVIADO) { saved ->
+            val launched = WhatsAppSender.sendMessage(context, saved.proveedorTelefono, msg)
+            if (!launched) {
+              WhatsAppSender.copyToClipboard(context, msg)
+              viewModel.showMessage("No se encontró app para compartir; el texto se copió al portapapeles")
+            }
+          }
+        } else {
+          if (pedido.estado == PedidoEstado.BORRADOR) {
+            viewModel.updatePedidoEstado(pedido.id, PedidoEstado.ENVIADO)
+          }
+          val launched = WhatsAppSender.sendMessage(context, pedido.proveedorTelefono, msg)
+          if (!launched) {
+            WhatsAppSender.copyToClipboard(context, msg)
+            viewModel.showMessage("No se encontró app para compartir; el texto se copió al portapapeles")
+          }
+        }
+      },
+    )
+  }
+}
