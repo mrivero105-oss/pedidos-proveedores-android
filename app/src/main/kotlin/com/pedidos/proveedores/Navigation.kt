@@ -1,6 +1,7 @@
 package com.pedidos.proveedores
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -9,7 +10,9 @@ import androidx.compose.material.icons.rounded.ShoppingCartCheckout
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -27,9 +30,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import com.pedidos.proveedores.data.local.AppThemeMode
 import com.pedidos.proveedores.domain.model.Pedido
 import com.pedidos.proveedores.domain.model.PedidoEstado
 import com.pedidos.proveedores.domain.whatsapp.WhatsAppOrderFormatter
@@ -54,7 +59,11 @@ private const val TAB_NUEVO_PEDIDO = 1
 private const val TAB_HISTORIAL = 2
 
 @Composable
-fun MainNavigation(viewModel: AppViewModel) {
+fun MainNavigation(
+  viewModel: AppViewModel,
+  themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+  onCycleTheme: () -> Unit = {},
+) {
   val context = LocalContext.current
   val backStack = rememberNavBackStack(HomeRoute)
   var selectedTab by rememberSaveable { mutableIntStateOf(TAB_PROVEEDORES) }
@@ -108,35 +117,41 @@ fun MainNavigation(viewModel: AppViewModel) {
           entry<HomeRoute> {
             Scaffold(
               bottomBar = {
-                NavigationBar {
-                  NavigationBarItem(
-                    selected = selectedTab == TAB_PROVEEDORES,
-                    onClick = { selectedTab = TAB_PROVEEDORES },
-                    icon = { Icon(Icons.Rounded.Storefront, contentDescription = null) },
-                    label = { Text("Proveedores") },
-                  )
-                  NavigationBarItem(
-                    selected = selectedTab == TAB_NUEVO_PEDIDO,
-                    onClick = { selectedTab = TAB_NUEVO_PEDIDO },
-                    icon = {
-                      BadgedBox(
-                        badge = {
-                          if (orderDraft.itemCount > 0) {
-                            Badge { Text(orderDraft.itemCount.toString()) }
+                Column {
+                  HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                  NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                  ) {
+                    NavigationBarItem(
+                      selected = selectedTab == TAB_PROVEEDORES,
+                      onClick = { selectedTab = TAB_PROVEEDORES },
+                      icon = { Icon(Icons.Rounded.Storefront, contentDescription = null) },
+                      label = { Text("Inicio") },
+                    )
+                    NavigationBarItem(
+                      selected = selectedTab == TAB_NUEVO_PEDIDO,
+                      onClick = { selectedTab = TAB_NUEVO_PEDIDO },
+                      icon = {
+                        BadgedBox(
+                          badge = {
+                            if (orderDraft.itemCount > 0) {
+                              Badge { Text(orderDraft.itemCount.toString()) }
+                            }
                           }
+                        ) {
+                          Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
                         }
-                      ) {
-                        Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
-                      }
-                    },
-                    label = { Text("Pedir") },
-                  )
-                  NavigationBarItem(
-                    selected = selectedTab == TAB_HISTORIAL,
-                    onClick = { selectedTab = TAB_HISTORIAL },
-                    icon = { Icon(Icons.AutoMirrored.Rounded.ReceiptLong, contentDescription = null) },
-                    label = { Text("Pedidos") },
-                  )
+                      },
+                      label = { Text("Pedir") },
+                    )
+                    NavigationBarItem(
+                      selected = selectedTab == TAB_HISTORIAL,
+                      onClick = { selectedTab = TAB_HISTORIAL },
+                      icon = { Icon(Icons.AutoMirrored.Rounded.ReceiptLong, contentDescription = null) },
+                      label = { Text("Pedidos") },
+                    )
+                  }
                 }
               },
             ) { homePadding ->
@@ -145,7 +160,10 @@ fun MainNavigation(viewModel: AppViewModel) {
                   proveedores = proveedores,
                   aiConfigured = aiSettings.isConfigured,
                   isaacPosSyncedCount = isaacPosProductos.size,
+                  isaacPosWithStockCount = isaacPosProductos.count { it.stockActual > 0.0 },
                   otaAvailableTag = otaAvailableTag,
+                  themeMode = themeMode,
+                  onCycleTheme = onCycleTheme,
                   onOpenAiSettings = {
                     viewModel.resetAiTestFeedback()
                     showAiSettingsDialog = true

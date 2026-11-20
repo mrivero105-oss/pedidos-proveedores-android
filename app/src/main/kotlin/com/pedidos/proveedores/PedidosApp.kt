@@ -7,6 +7,7 @@ import com.pedidos.proveedores.data.local.OtaSettingsStore
 import com.pedidos.proveedores.data.local.PedidosDbHelper
 import com.pedidos.proveedores.data.local.PedidosRepository
 import com.pedidos.proveedores.data.local.SqlitePedidosRepository
+import com.pedidos.proveedores.data.local.ThemeSettingsStore
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosClient
 import com.pedidos.proveedores.domain.ota.OtaUpdater
 import com.pedidos.proveedores.domain.parser.CatalogImporter
@@ -23,6 +24,7 @@ class AppContainer(app: Application) {
   val otaUpdater: OtaUpdater = OtaUpdater(app)
   val isaacPosSettingsStore: IsaacPosSettingsStore = IsaacPosSettingsStore(app)
   val isaacPosClient: IsaacPosClient = IsaacPosClient()
+  val themeSettingsStore: ThemeSettingsStore = ThemeSettingsStore(app)
 }
 
 class PedidosApp : Application() {

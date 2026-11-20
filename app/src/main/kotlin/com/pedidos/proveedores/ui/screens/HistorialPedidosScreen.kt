@@ -1,5 +1,6 @@
 package com.pedidos.proveedores.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -193,8 +194,10 @@ private fun PedidoHistoryCard(
   }
 
   Card(
-    shape = RoundedCornerShape(16.dp),
+    shape = RoundedCornerShape(14.dp),
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     modifier = Modifier
       .fillMaxWidth()
       .clickable(onClick = onClick),

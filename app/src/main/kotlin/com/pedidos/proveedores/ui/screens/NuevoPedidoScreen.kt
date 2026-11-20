@@ -1,5 +1,6 @@
 package com.pedidos.proveedores.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -499,14 +500,19 @@ private fun ProductOrderCard(
 ) {
   val isSelected = quantity > 0.0
   Card(
-    shape = RoundedCornerShape(14.dp),
+    shape = RoundedCornerShape(12.dp),
     colors = CardDefaults.cardColors(
       containerColor = if (isSelected) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)
       } else {
         MaterialTheme.colorScheme.surface
       }
     ),
+    border = BorderStroke(
+      width = if (isSelected) 1.5.dp else 1.dp,
+      color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+    ),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     modifier = Modifier
       .fillMaxWidth()
       .clickable(onClick = onQuantityClick),
@@ -514,22 +520,22 @@ private fun ProductOrderCard(
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 12.dp, vertical = 10.dp),
+        .padding(horizontal = 10.dp, vertical = 8.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       if (!producto.imagenRuta.isNullOrBlank()) {
         ProductThumbnail(
           imagePath = producto.imagenRuta,
           contentDescription = producto.nombre,
-          size = 46.dp,
+          size = 42.dp,
         )
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(8.dp))
       }
       Column(modifier = Modifier.weight(1f)) {
         Text(
           text = producto.nombre,
-          style = MaterialTheme.typography.bodyLarge,
-          fontWeight = FontWeight.Medium,
+          style = MaterialTheme.typography.bodyMedium,
+          fontWeight = FontWeight.SemiBold,
           maxLines = 2,
           overflow = TextOverflow.Ellipsis,
         )
@@ -543,30 +549,32 @@ private fun ProductOrderCard(
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (producto.stockPos != null) {
-          Spacer(Modifier.height(4.dp))
+          Spacer(Modifier.height(3.dp))
           StockPosBadge(stock = producto.stockPos, isLow = producto.stockPos <= lowStockThreshold)
         }
       }
-      Spacer(Modifier.width(8.dp))
+      Spacer(Modifier.width(6.dp))
       if (!isSelected) {
         FilledTonalButton(
           onClick = onIncrement,
-          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+          shape = RoundedCornerShape(10.dp),
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
         ) {
-          Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(4.dp))
-          Text("Pedir")
+          Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(Modifier.width(3.dp))
+          Text("Pedir", style = MaterialTheme.typography.labelLarge)
         }
       } else {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-          FilledTonalIconButton(onClick = onDecrement, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Rounded.Remove, contentDescription = "Restar", modifier = Modifier.size(18.dp))
+          FilledTonalIconButton(onClick = onDecrement, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Rounded.Remove, contentDescription = "Restar", modifier = Modifier.size(16.dp))
           }
           Surface(
             color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             shape = RoundedCornerShape(8.dp),
             modifier = Modifier.clickable(onClick = onQuantityClick),
           ) {
@@ -574,11 +582,11 @@ private fun ProductOrderCard(
               text = PriceParser.formatQuantity(quantity),
               style = MaterialTheme.typography.titleSmall,
               fontWeight = FontWeight.Bold,
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+              modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
             )
           }
-          FilledIconButton(onClick = onIncrement, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Rounded.Add, contentDescription = "Sumar", modifier = Modifier.size(18.dp))
+          FilledIconButton(onClick = onIncrement, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Rounded.Add, contentDescription = "Sumar", modifier = Modifier.size(16.dp))
           }
         }
       }

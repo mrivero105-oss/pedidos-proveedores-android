@@ -3,6 +3,7 @@ package com.pedidos.proveedores.ui.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -527,29 +528,31 @@ private fun ProductoCatalogoRow(
   onDelete: () -> Unit,
 ) {
   Card(
-    shape = RoundedCornerShape(14.dp),
+    shape = RoundedCornerShape(12.dp),
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     modifier = Modifier.fillMaxWidth(),
   ) {
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 12.dp, vertical = 10.dp),
+        .padding(horizontal = 10.dp, vertical = 8.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       if (!producto.imagenRuta.isNullOrBlank()) {
         ProductThumbnail(
           imagePath = producto.imagenRuta,
           contentDescription = producto.nombre,
-          size = 48.dp,
+          size = 44.dp,
         )
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(8.dp))
       }
       Column(modifier = Modifier.weight(1f)) {
         Text(
           text = producto.nombre,
-          style = MaterialTheme.typography.bodyLarge,
-          fontWeight = FontWeight.Medium,
+          style = MaterialTheme.typography.bodyMedium,
+          fontWeight = FontWeight.SemiBold,
           maxLines = 2,
           overflow = TextOverflow.Ellipsis,
         )

@@ -1,5 +1,6 @@
 package com.pedidos.proveedores.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,6 +69,8 @@ import com.pedidos.proveedores.domain.model.ProveedorResumen
 import com.pedidos.proveedores.domain.parser.PriceParser
 import com.pedidos.proveedores.ui.IsaacPosSyncUiState
 import com.pedidos.proveedores.ui.components.ProveedorFormDialog
+import com.pedidos.proveedores.ui.theme.providerAvatarColor
+import com.pedidos.proveedores.ui.theme.providerInitials
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -296,10 +299,12 @@ fun IsaacPosSyncScreen(
         .padding(innerPadding)
         .padding(horizontal = 16.dp),
     ) {
-      // Tarjeta de estado + botón Sincronizar
+      // Tarjeta de estado ejecutiva + botón Sincronizar
       Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier.fillMaxWidth(),
       ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -550,12 +555,14 @@ fun IsaacPosSyncScreen(
             item(key = "header_${group.providerName}") {
               val groupIds = group.items.map { it.productoId }.toSet()
               val allGroupSelected = groupIds.isNotEmpty() && groupIds.all { it in selectedPosIds }
+              val groupAccent = if (group.isAssigned) providerAvatarColor(group.providerName) else MaterialTheme.colorScheme.onSurfaceVariant
               Surface(
                 color = if (group.isAssigned) {
-                  MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                  groupAccent.copy(alpha = 0.11f)
                 } else {
                   MaterialTheme.colorScheme.surfaceVariant
                 },
+                border = BorderStroke(1.dp, if (group.isAssigned) groupAccent.copy(alpha = 0.28f) else MaterialTheme.colorScheme.outlineVariant),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
@@ -564,7 +571,7 @@ fun IsaacPosSyncScreen(
                 Row(
                   modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
@@ -573,18 +580,35 @@ fun IsaacPosSyncScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                   ) {
-                    Icon(
-                      Icons.Rounded.Storefront,
-                      contentDescription = null,
-                      modifier = Modifier.size(18.dp),
-                      tint = if (group.isAssigned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (group.isAssigned) {
+                      Surface(
+                        color = groupAccent.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.size(30.dp),
+                      ) {
+                        Box(contentAlignment = Alignment.Center) {
+                          Text(
+                            text = providerInitials(group.providerName),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = groupAccent,
+                          )
+                        }
+                      }
+                    } else {
+                      Icon(
+                        Icons.Rounded.Storefront,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                    }
                     Column {
                       Text(
                         text = group.providerName,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = if (group.isAssigned) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (group.isAssigned) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                       )
@@ -607,7 +631,8 @@ fun IsaacPosSyncScreen(
                       } else {
                         selectedPosIds + groupIds
                       }
-                    }
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                   ) {
                     Text(if (allGroupSelected) "Quitar" else "Marcar")
                   }
@@ -620,8 +645,16 @@ fun IsaacPosSyncScreen(
               val isLow = item.stockActual <= settings.lowStockThreshold
 
               Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(11.dp),
+                colors = CardDefaults.cardColors(
+                  containerColor = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                  else MaterialTheme.colorScheme.surface
+                ),
+                border = BorderStroke(
+                  width = if (isChecked) 1.5.dp else 1.dp,
+                  color = if (isChecked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier
                   .fillMaxWidth()
                   .clickable {
