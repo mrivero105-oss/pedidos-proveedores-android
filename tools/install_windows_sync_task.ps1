@@ -2,6 +2,7 @@
 .SYNOPSIS
   Registra la Tarea Programada de Windows "IsaacPOS_Sync_Supabase" para mantener
   sincronizado el stock real y los proveedores de Isaac POS hacia Supabase cada N minutos.
+  Funciona sin requerir permisos de Administrador (ejecuta bajo el usuario actual).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\tools\install_windows_sync_task.ps1 -IntervalMinutes 15
@@ -21,7 +22,7 @@ if (-not (Test-Path $scriptPath)) {
 }
 
 if (-not (Test-Path $envPath)) {
-  Write-Warning "Aún no existe $envPath. Copia tools\env.example a tools\.env y coloca tu SUPABASE_SERVICE_ROLE_KEY antes de esperar subidas exitosas."
+  Write-Warning "Aún no existe $envPath. Crea tools\.env con SUPABASE_SERVICE_ROLE_KEY antes de esperar subidas exitosas."
 }
 
 $pythonCmd = (Get-Command pythonw.exe -ErrorAction SilentlyContinue)
@@ -29,31 +30,51 @@ if (-not $pythonCmd) {
   $pythonCmd = (Get-Command python.exe -ErrorAction Stop)
 }
 
-$action = New-ScheduledTaskAction `
-  -Execute $pythonCmd.Source `
-  -Argument "`"$scriptPath`" --push-rest" `
-  -WorkingDirectory $toolsDir
+$registered = $false
+try {
+  $action = New-ScheduledTaskAction `
+    -Execute $pythonCmd.Source `
+    -Argument "`"$scriptPath`" --push-rest" `
+    -WorkingDirectory $toolsDir
 
-$trigger = New-ScheduledTaskTrigger `
-  -Once `
-  -At (Get-Date).AddMinutes(1) `
-  -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
-  -RepetitionDuration ([TimeSpan]::MaxValue)
+  $trigger = New-ScheduledTaskTrigger `
+    -Once `
+    -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
 
-$settings = New-ScheduledTaskSettingsSet `
-  -AllowStartIfOnBatteries `
-  -DontStopIfGoingOnBatteries `
-  -StartWhenAvailable `
-  -MultipleInstances IgnoreNew `
-  -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+  $settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
 
-Register-ScheduledTask `
-  -TaskName $TaskName `
-  -Action $action `
-  -Trigger $trigger `
-  -Settings $settings `
-  -Description "Sincroniza en solo lectura el stock real y proveedores de Isaac POS (PC local) hacia Supabase cada $IntervalMinutes minutos." `
-  -Force | Out-Null
+  $principal = New-ScheduledTaskPrincipal `
+    -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -LogonType Interactive `
+    -RunLevel Limited
+
+  Register-ScheduledTask `
+    -TaskName $TaskName `
+    -Action $action `
+    -Trigger $trigger `
+    -Settings $settings `
+    -Principal $principal `
+    -Description "Sincroniza en solo lectura el stock real y proveedores de Isaac POS hacia Supabase cada $IntervalMinutes minutos." `
+    -Force | Out-Null
+  $registered = $true
+} catch {
+  Write-Warning "Register-ScheduledTask devolvió '$($_.Exception.Message)'. Usando schtasks.exe como alternativa..."
+}
+
+if (-not $registered) {
+  $taskCmd = "`"$($pythonCmd.Source)`" `"$scriptPath`" --push-rest"
+  & schtasks.exe /Create /F /SC MINUTE /MO $IntervalMinutes /TN $TaskName /TR $taskCmd | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo registrar la tarea programada con schtasks.exe (código $LASTEXITCODE)."
+  }
+}
 
 Write-Host "Tarea programada '$TaskName' registrada correctamente (cada $IntervalMinutes min)." -ForegroundColor Green
 Write-Host "Ejecutable: $($pythonCmd.Source)"
