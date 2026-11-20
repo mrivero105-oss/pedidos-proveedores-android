@@ -78,8 +78,8 @@ jobs:
           OTA_GITHUB_REPO: ${{ github.repository }}
           SIGNING_KEYSTORE_PATH: ${{ steps.signing.outputs.keystore_path }}
           SIGNING_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'pedidos-release' }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.KEYSTORE_PASSWORD }}
         run: |
           if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
             ./gradlew assembleRelease --no-daemon
