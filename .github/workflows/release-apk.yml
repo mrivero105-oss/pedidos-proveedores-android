@@ -53,7 +53,9 @@ jobs:
           echo "version_code=${CODE}" >> "$GITHUB_OUTPUT"
 
       - name: Ejecutar pruebas unitarias
-        run: ./gradlew testDebugUnitTest --no-daemon
+        run: |
+          chmod +x ./gradlew
+          ./gradlew testDebugUnitTest --no-daemon
 
       - name: Preparar keystore de firma (si existe en Secrets)
         id: signing
