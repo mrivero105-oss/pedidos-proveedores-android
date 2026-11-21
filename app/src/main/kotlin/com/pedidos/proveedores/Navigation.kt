@@ -5,8 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.CompareArrows
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
-import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.ShoppingCartCheckout
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material3.Badge
@@ -39,7 +39,6 @@ import com.pedidos.proveedores.data.local.AppThemeMode
 import com.pedidos.proveedores.domain.model.Pedido
 import com.pedidos.proveedores.domain.model.PedidoEstado
 import com.pedidos.proveedores.domain.pricing.PricingIntelligenceEngine
-import com.pedidos.proveedores.domain.pricing.PvpAdjustmentExporter
 import com.pedidos.proveedores.domain.whatsapp.WhatsAppOrderFormatter
 import com.pedidos.proveedores.domain.whatsapp.WhatsAppSender
 import com.pedidos.proveedores.ui.AppViewModel
@@ -159,21 +158,8 @@ fun MainNavigation(
                     NavigationBarItem(
                       selected = selectedTab == TAB_PRECIOS,
                       onClick = { selectedTab = TAB_PRECIOS },
-                      icon = {
-                        BadgedBox(
-                          badge = {
-                            if (pricingSummary.criticalOrLossCount > 0) {
-                              Badge {
-                                val count = pricingSummary.criticalOrLossCount
-                                Text(if (count > 99) "99+" else count.toString())
-                              }
-                            }
-                          }
-                        ) {
-                          Icon(Icons.AutoMirrored.Rounded.TrendingUp, contentDescription = null)
-                        }
-                      },
-                      label = { Text("Precios") },
+                      icon = { Icon(Icons.AutoMirrored.Rounded.CompareArrows, contentDescription = null) },
+                      label = { Text("Compras") },
                     )
                     NavigationBarItem(
                       selected = selectedTab == TAB_NUEVO_PEDIDO,
@@ -237,31 +223,12 @@ fun MainNavigation(
                   lowStockThreshold = isaacPosSettings.lowStockThreshold,
                   bcvRefreshing = bcvRefreshing,
                   onFetchBcvRate = { viewModel.fetchOfficialBcvRate(silent = false) },
-                  onSavePricingSettings = { rate, src, target, crit, iva, minSave ->
-                    viewModel.savePricingSettings(rate, src, target, crit, iva, minSave)
+                  onSavePricingSettings = { rate, src, iva, minSave ->
+                    viewModel.savePricingSettings(rate, src, iva, minSave)
                   },
                   onUpdateMinSavingsPercent = { viewModel.updateMinOptimalSavingsPercent(it) },
                   onUpdateProductPackTax = { prodId, units, gravado ->
                     viewModel.updateProductoPricingOverrides(prodId, units, gravado)
-                  },
-                  onCopyPvpList = { alerts ->
-                    val txt = PvpAdjustmentExporter.formatWhatsAppText(alerts, pricingSettings.targetMarkupPercent)
-                    WhatsAppSender.copyToClipboard(context, txt)
-                    viewModel.showMessage("Lista de ${alerts.size} PVP sugeridos copiada")
-                  },
-                  onSharePvpWhatsApp = { alerts ->
-                    val txt = PvpAdjustmentExporter.formatWhatsAppText(alerts, pricingSettings.targetMarkupPercent)
-                    val sent = WhatsAppSender.sendMessage(context, "", txt)
-                    if (!sent) {
-                      WhatsAppSender.copyToClipboard(context, txt)
-                      viewModel.showMessage("No se encontró WhatsApp; la lista se copió al portapapeles")
-                    }
-                  },
-                  onExportPvpCsv = { alerts ->
-                    val ok = PvpAdjustmentExporter.shareCsvFile(context, alerts, pricingSettings.targetMarkupPercent)
-                    if (!ok) {
-                      viewModel.showMessage("No se pudo exportar el archivo CSV")
-                    }
                   },
                   onCreateOptimalDrafts = { plan ->
                     viewModel.createDraftOrdersFromOptimalPlan(plan) { created ->

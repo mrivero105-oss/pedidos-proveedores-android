@@ -9,8 +9,6 @@ data class PricingSettings(
   val tasaBsPorUsd: Double = 0.0,
   val tasaUpdatedAtMillis: Long? = null,
   val tasaSourceLabel: String = "",
-  val targetMarkupPercent: Double = 30.0,
-  val criticalMarkupPercent: Double = 15.0,
   val defaultIvaPercent: Double = 16.0,
   val minOptimalSavingsPercent: Double = 3.0,
 ) {
@@ -19,9 +17,9 @@ data class PricingSettings(
 }
 
 /**
- * Almacena la configuración local de inteligencia de compras:
- * tasa Bs/USD (BCV o manual), meta de recargo sobre costo (%), umbral crítico,
- * IVA por defecto y ahorro mínimo para cambiar de proveedor en Pedido Óptimo.
+ * Almacena la configuración local de compras a proveedores:
+ * tasa Bs/USD (BCV oficial o manual), IVA por defecto para catálogos sin IVA
+ * y ahorro mínimo (%) para recomendar cambiar de proveedor en Pedido Óptimo.
  */
 class PricingSettingsStore(context: Context) {
 
@@ -36,8 +34,6 @@ class PricingSettingsStore(context: Context) {
       tasaBsPorUsd = prefs.getFloat(KEY_TASA_BS, 0f).toDouble(),
       tasaUpdatedAtMillis = updatedAt,
       tasaSourceLabel = prefs.getString(KEY_TASA_SOURCE, "").orEmpty(),
-      targetMarkupPercent = prefs.getFloat(KEY_TARGET_MARKUP, 30f).toDouble().coerceIn(1.0, 500.0),
-      criticalMarkupPercent = prefs.getFloat(KEY_CRITICAL_MARKUP, 15f).toDouble().coerceIn(0.0, 200.0),
       defaultIvaPercent = prefs.getFloat(KEY_DEFAULT_IVA, 16f).toDouble().coerceIn(0.0, 50.0),
       minOptimalSavingsPercent = prefs.getFloat(KEY_MIN_SAVINGS, 3f).toDouble().coerceIn(0.0, 50.0),
     )
@@ -62,14 +58,10 @@ class PricingSettingsStore(context: Context) {
   fun saveSettings(
     tasaBsPorUsd: Double,
     tasaSourceLabel: String,
-    targetMarkupPercent: Double,
-    criticalMarkupPercent: Double,
     defaultIvaPercent: Double = 16.0,
     minOptimalSavingsPercent: Double = 3.0,
   ) {
     val safeRate = if (tasaBsPorUsd.isFinite() && tasaBsPorUsd >= 0.0) tasaBsPorUsd else _settings.value.tasaBsPorUsd
-    val safeTarget = targetMarkupPercent.coerceIn(1.0, 500.0)
-    val safeCritical = criticalMarkupPercent.coerceIn(0.0, safeTarget)
     val safeIva = defaultIvaPercent.coerceIn(0.0, 50.0)
     val safeSavings = minOptimalSavingsPercent.coerceIn(0.0, 50.0)
     val rateChanged = kotlin.math.abs(safeRate - _settings.value.tasaBsPorUsd) > 0.0001
@@ -84,8 +76,6 @@ class PricingSettingsStore(context: Context) {
       putFloat(KEY_TASA_BS, safeRate.toFloat())
       if (now != null) putLong(KEY_TASA_UPDATED_AT, now) else remove(KEY_TASA_UPDATED_AT)
       putString(KEY_TASA_SOURCE, source)
-      putFloat(KEY_TARGET_MARKUP, safeTarget.toFloat())
-      putFloat(KEY_CRITICAL_MARKUP, safeCritical.toFloat())
       putFloat(KEY_DEFAULT_IVA, safeIva.toFloat())
       putFloat(KEY_MIN_SAVINGS, safeSavings.toFloat())
     }.apply()
@@ -94,8 +84,6 @@ class PricingSettingsStore(context: Context) {
       tasaBsPorUsd = safeRate,
       tasaUpdatedAtMillis = now,
       tasaSourceLabel = source,
-      targetMarkupPercent = safeTarget,
-      criticalMarkupPercent = safeCritical,
       defaultIvaPercent = safeIva,
       minOptimalSavingsPercent = safeSavings,
     )
@@ -112,8 +100,6 @@ class PricingSettingsStore(context: Context) {
     private const val KEY_TASA_BS = "tasa_bs_usd"
     private const val KEY_TASA_UPDATED_AT = "tasa_updated_at"
     private const val KEY_TASA_SOURCE = "tasa_source"
-    private const val KEY_TARGET_MARKUP = "target_markup_pct"
-    private const val KEY_CRITICAL_MARKUP = "critical_markup_pct"
     private const val KEY_DEFAULT_IVA = "default_iva_pct"
     private const val KEY_MIN_SAVINGS = "min_optimal_savings_pct"
   }

@@ -653,8 +653,8 @@ private fun SuggestedReconcileCard(
               overflow = TextOverflow.Ellipsis,
             )
             val posMeta = buildList {
-              pos.costoUnitario?.let { add("Costo POS: ${PriceParser.formatCurrency(it)}") }
-              pos.precioVenta?.let { add("PVP: ${PriceParser.formatCurrency(it)}") }
+              if (pos.unidadPedido.isNotBlank()) add(pos.unidadPedido)
+              pos.costoUnitario?.let { add("Costo ant.: ${PriceParser.formatCurrency(it)}") }
               if (pos.codigoBarra.isNotBlank()) add("Cód: ${pos.codigoBarra}")
             }.joinToString(" · ")
             if (posMeta.isNotBlank()) {
@@ -736,8 +736,8 @@ private fun LinkedReconcileCard(
           )
           val meta = buildList {
             if (local.unidad.isNotBlank()) add(local.unidad)
-            local.precio?.let { add("Cat: ${PriceParser.formatCurrency(it)}") }
-            pos.precioVenta?.let { add("PVP: ${PriceParser.formatCurrency(it)}") }
+            local.precio?.let { add("Costo lista: ${PriceParser.formatCurrency(it)}") }
+            pos.costoUnitario?.let { add("Costo ant.: ${PriceParser.formatCurrency(it)}") }
           }.joinToString(" · ")
           if (meta.isNotBlank()) {
             Text(
@@ -867,8 +867,7 @@ private fun PosOnlyCard(
         )
         val meta = buildList {
           if (pos.unidadPedido.isNotBlank()) add(pos.unidadPedido)
-          pos.costoUnitario?.let { add("Costo: ${PriceParser.formatCurrency(it)}") }
-          pos.precioVenta?.let { add("PVP: ${PriceParser.formatCurrency(it)}") }
+          pos.costoUnitario?.let { add("Último costo: ${PriceParser.formatCurrency(it)}") }
         }.joinToString(" · ")
         if (meta.isNotBlank()) {
           Text(
@@ -1027,7 +1026,7 @@ private fun PosProductPickerDialog(
                   val sub = buildList {
                     if (pos.proveedorNombreRemoto.isNotBlank()) add(pos.proveedorNombreRemoto)
                     if (pos.codigoBarra.isNotBlank()) add(pos.codigoBarra)
-                    pos.precioVenta?.let { add("PVP ${PriceParser.formatCurrency(it)}") }
+                    pos.costoUnitario?.let { add("Costo ${PriceParser.formatCurrency(it)}") }
                   }.joinToString(" · ")
                   if (sub.isNotBlank()) {
                     Text(

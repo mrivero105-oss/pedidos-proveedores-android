@@ -22,8 +22,6 @@ class PricingIntelligenceEngineTest {
   private val defaultSettings = PricingSettings(
     tasaBsPorUsd = 900.0,
     tasaSourceLabel = "BCV oficial",
-    targetMarkupPercent = 30.0,
-    criticalMarkupPercent = 15.0,
     defaultIvaPercent = 16.0,
     minOptimalSavingsPercent = 3.0,
   )
@@ -58,11 +56,8 @@ class PricingIntelligenceEngineTest {
 
     assertEquals(12.0, offerBulk.packDetection.units, 0.001)
     assertEquals(4.78 / 12.0, offerBulk.effectiveUnitCostUsd!!, 0.001)
-    assertEquals(30.54, offerBulk.markupPercent!!, 0.2)
-    assertEquals(23.40, offerBulk.grossMarginPercent!!, 0.2)
-    assertEquals(MarginHealth.HEALTHY, offerBulk.health)
 
-    // Caso de protección: el POS dice Bulto x 12 pero el catálogo cotizó por unidad ($0.40 vs PVP $0.52) -> NO debe dividir por 12
+    // Si el vendedor cotiza por unidad ($0.40) aunque la ficha diga Bulto x 12, no debe dividir entre 12
     val prodUnit = Producto(
       id = 11L,
       proveedorId = 1L,
@@ -80,7 +75,6 @@ class PricingIntelligenceEngineTest {
     )
     assertEquals(1.0, offerUnit.packDetection.units, 0.001)
     assertEquals(0.40, offerUnit.effectiveUnitCostUsd!!, 0.001)
-    assertEquals(30.0, offerUnit.markupPercent!!, 0.1)
   }
 
   @Test
@@ -93,7 +87,7 @@ class PricingIntelligenceEngineTest {
       rutaLocal = "/tmp/a.pdf",
       productosImportados = 2,
       moneda = MonedaCatalogo.VES,
-      tasaFijaBs = null, // Usa tasa global 900.0
+      tasaFijaBs = null,
       modoIva = ModoIvaCatalogo.SOLO_GRAVADOS,
       porcentajeIva = 16.0,
     )
@@ -128,7 +122,7 @@ class PricingIntelligenceEngineTest {
       catalogoId = 100L,
       nombre = "Pasta Corta Primor 500g",
       unidad = "u",
-      precio = 900.0, // Bs 900 / 900 = $1.00 -> Exento = $1.00 (NO suma 16%)
+      precio = 900.0, // Bs 900 / 900 = $1.00 -> Exento = $1.00
       isaacPosId = "pos-pasta",
     )
 
@@ -138,18 +132,14 @@ class PricingIntelligenceEngineTest {
     assertTrue(evalGravado.taxDetection.isTaxable)
     assertTrue(evalGravado.ivaApplied)
     assertEquals(2.90, evalGravado.effectiveUnitCostUsd!!, 0.001)
-    assertEquals(MarginHealth.CRITICAL, evalGravado.health) // (3.31 - 2.90) / 2.90 = 14.1% <= 15%
-    assertEquals(3.77, evalGravado.suggestedPvpUsd!!, 0.01)
 
     assertFalse(evalExento.taxDetection.isTaxable)
     assertFalse(evalExento.ivaApplied)
     assertEquals(1.00, evalExento.effectiveUnitCostUsd!!, 0.001)
-    assertEquals(32.0, evalExento.markupPercent!!, 0.1)
-    assertEquals(MarginHealth.HEALTHY, evalExento.health)
   }
 
   @Test
-  fun comparesMultipleSuppliersAcrossDifferentPacksAndDetectsCheaperAlternative() {
+  fun comparesMultipleSuppliersAcrossDifferentPacksAndCalculatesSavings() {
     val posPepsi = IsaacPosProducto(
       productoId = "pos-pepsi",
       nombre = "Refresco Pepsi 1L",
@@ -177,7 +167,7 @@ class PricingIntelligenceEngineTest {
       productosImportados = 1,
       importadoEn = 1_000L,
     )
-    // SERVICPAN: Bulto x 6 a $6.00 -> $1.00/u (markup +8% crítico vs PVP $1.08)
+    // SERVICPAN: Bulto x 6 a $6.00 -> $1.00/u
     val offerExpensive = Producto(
       id = 30L,
       proveedorId = 1L,
@@ -215,17 +205,10 @@ class PricingIntelligenceEngineTest {
     assertEquals(0.80, cmp.cheapestOffer.effectiveUnitCostUsd!!, 0.001)
     assertEquals(0.20, cmp.savingsPerUnitUsd, 0.001)
     assertEquals(20.0, cmp.savingsPercent, 0.1)
-
-    // Alerta de margen debe detectar CRITICAL por el catálogo más reciente (SERVICPAN $1.00/u) y sugerir TINITO ($0.80/u)
-    assertEquals(1, summary.criticalOrLossCount)
-    val alert = summary.marginAlerts.first()
-    assertEquals(MarginHealth.CRITICAL, alert.primaryOffer.health)
-    assertNotNull(alert.cheaperAlternative)
-    assertEquals(provTinito.id, alert.cheaperAlternative!!.proveedor.id)
   }
 
   @Test
-  fun detectsPriceIncreasesFromHistoryAndBuildsOptimalDraftOrders() {
+  fun detectsSupplierCostIncreasesAndBuildsOptimalDraftOrders() {
     val posPepsi = IsaacPosProducto(
       productoId = "pos-pepsi",
       nombre = "Refresco Pepsi 1L",
@@ -251,7 +234,7 @@ class PricingIntelligenceEngineTest {
       Producto(id = 40L, proveedorId = 1L, nombre = "Pepsi 1L", unidad = "Bulto x 6", precio = 6.00, stockPos = 2.0, isaacPosId = "pos-pepsi"),
       Producto(id = 41L, proveedorId = 2L, nombre = "Pepsi 1L", unidad = "Bulto x 6", precio = 4.80, stockPos = 2.0, isaacPosId = "pos-pepsi"),
       Producto(id = 42L, proveedorId = 1L, nombre = "Pasta Primor 500g", unidad = "u", precio = 1.00, stockPos = 1.0, isaacPosId = "pos-pasta"),
-      // Tinito solo es 1% más barato en Pasta ($0.99 vs $1.00) -> con minSavings=3% debe quedarse con SERVICPAN (proveedor principal POS)
+      // Tinito solo es 1% más barato en Pasta ($0.99 vs $1.00) -> con minSavings=3% mantiene SERVICPAN
       Producto(id = 43L, proveedorId = 2L, nombre = "Pasta Primor 500g", unidad = "u", precio = 0.99, stockPos = 1.0, isaacPosId = "pos-pasta"),
     )
 
@@ -289,14 +272,13 @@ class PricingIntelligenceEngineTest {
       settings = defaultSettings,
     )
 
-    // Detección de subida en historial (+20%)
+    assertEquals(1, summary.priceIncreaseCount)
     val pepsiIncrease = summary.priceChanges.firstOrNull { it.productName == "Pepsi 1L" }
     assertNotNull(pepsiIncrease)
     assertTrue(pepsiIncrease!!.isIncrease)
     assertEquals(20.0, pepsiIncrease.deltaPercent, 0.2)
     assertEquals(PriceChangeOrigin.CATALOG_HISTORY, pepsiIncrease.origin)
 
-    // Plan Óptimo con ahorro mínimo 3%: Pepsi -> Tinito (20% ahorro >= 3%), Pasta -> SERVICPAN (1% ahorro < 3%)
     val plan = PricingIntelligenceEngine.buildOptimalOrderPlan(
       allOffers = summary.allOffers,
       lowStockThreshold = 5.0,
@@ -315,36 +297,5 @@ class PricingIntelligenceEngineTest {
     assertEquals(2, drafts.size)
     assertTrue(drafts.any { it.proveedorId == provTinito.id && it.items.size == 1 })
     assertTrue(drafts.any { it.proveedorId == provServicpan.id && it.items.size == 1 })
-  }
-
-  @Test
-  fun formatsPvpAdjustmentsForWhatsAppAndExcelCsv() {
-    val pos = IsaacPosProducto(
-      productoId = "p1",
-      codigoBarra = "7591234567890",
-      nombre = "Producto, con coma",
-      precioVenta = 1.00,
-      stockActual = 3.0,
-    )
-    val prod = Producto(id = 1L, proveedorId = 1L, nombre = "Producto, con coma", precio = 0.95, isaacPosId = "p1")
-    val summary = PricingIntelligenceEngine.analyze(
-      proveedores = listOf(provServicpan),
-      productos = listOf(prod),
-      catalogos = emptyList(),
-      posProducts = listOf(pos),
-      historialPrecios = emptyList(),
-      settings = defaultSettings,
-    )
-
-    val waText = PvpAdjustmentExporter.formatWhatsAppText(summary.marginAlerts, 30.0)
-    assertTrue(waText.contains("[CRÍTICO]"))
-    assertTrue(waText.contains("PVP sugerido"))
-    assertTrue(waText.contains("s/costo"))
-    assertTrue(waText.contains("s/PVP"))
-
-    val csv = PvpAdjustmentExporter.formatCsv(summary.marginAlerts, 30.0)
-    assertTrue(csv.startsWith("\uFEFFEstado,Codigo,Producto"))
-    assertTrue(csv.contains("\"Producto, con coma\""))
-    assertTrue(csv.contains("1.24")) // ceil(0.95 * 1.30 = 1.235) = 1.24
   }
 }

@@ -13,19 +13,10 @@ import com.pedidos.proveedores.domain.model.Producto
 import com.pedidos.proveedores.domain.model.Proveedor
 import java.text.Normalizer
 import kotlin.math.abs
-import kotlin.math.ceil
-
-enum class MarginHealth(val etiqueta: String, val sortPriority: Int) {
-  LOSS("A pérdida", 0),
-  CRITICAL("Margen crítico", 1),
-  BELOW_TARGET("Bajo meta", 2),
-  HEALTHY("Saludable", 3),
-  NO_PVP("Sin PVP", 4),
-}
 
 enum class PriceChangeOrigin(val etiqueta: String) {
-  CATALOG_HISTORY("Catálogo anterior → actual"),
-  CATALOG_VS_POS("Costo POS → catálogo"),
+  CATALOG_HISTORY("Lista anterior → actual"),
+  CATALOG_VS_POS("Último costo → lista nueva"),
 }
 
 data class PackDetection(
@@ -57,12 +48,6 @@ data class EvaluatedOffer(
   val rawPriceOriginal: Double?,
   val packCostUsd: Double?,
   val effectiveUnitCostUsd: Double?,
-  val posPvpUsd: Double?,
-  val markupPercent: Double?,
-  val grossMarginPercent: Double?,
-  val profitPerUnitUsd: Double?,
-  val suggestedPvpUsd: Double?,
-  val health: MarginHealth,
   val stockPos: Double?,
   val isPrimaryPosSupplier: Boolean,
   val updatedAtMillis: Long,
@@ -73,19 +58,11 @@ data class SupplierComparisonItem(
   val displayName: String,
   val codigoBarra: String,
   val stockPos: Double?,
-  val posPvpUsd: Double?,
   val offers: List<EvaluatedOffer>,
   val cheapestOffer: EvaluatedOffer,
   val mostExpensiveOffer: EvaluatedOffer,
   val savingsPerUnitUsd: Double,
   val savingsPercent: Double,
-)
-
-data class MarginAlertItem(
-  val canonicalKey: String,
-  val primaryOffer: EvaluatedOffer,
-  val cheaperAlternative: EvaluatedOffer?,
-  val pvpDiffUsd: Double?,
 )
 
 data class PriceChangeItem(
@@ -138,20 +115,17 @@ data class OptimalOrderPlan(
 data class PricingIntelligenceSummary(
   val allOffers: List<EvaluatedOffer>,
   val comparisons: List<SupplierComparisonItem>,
-  val marginAlerts: List<MarginAlertItem>,
   val priceChanges: List<PriceChangeItem>,
-  val criticalOrLossCount: Int,
-  val belowTargetCount: Int,
-  val healthyCount: Int,
+  val priceIncreaseCount: Int,
   val missingRateOffersCount: Int,
 )
 
 /**
- * Motor puro de Inteligencia de Compras y Márgenes:
- * - Normaliza precios de catálogos en USD o Bs. (tasa fija o global) con regla de IVA (+16% solo (G) o todo).
- * - Normaliza bultos/cajas a costo unitario en USD con validación contra PVP del POS para evitar falsas divisiones.
- * - Calcula simultáneamente % sobre costo (markup) y % sobre PVP (margen bruto), además del PVP sugerido.
- * - Compara proveedores, detecta subidas/bajadas de precio y arma Pedidos Óptimos multi-proveedor.
+ * Motor puro de compras a proveedores:
+ * - Normaliza listas de precios en USD o Bs. (tasa fija o BCV global) y regla de IVA (+16% solo (G) o todo).
+ * - Normaliza empaques (bultos/cajas) a costo unitario en USD para comparar proveedores en igualdad de condiciones.
+ * - Compara qué proveedor vende más barato cada producto, detecta subidas/bajadas de costo entre listas
+ *   y arma Pedidos Óptimos multi-proveedor listos para enviar por WhatsApp.
  */
 object PricingIntelligenceEngine {
 
@@ -174,9 +148,6 @@ object PricingIntelligenceEngine {
     return TaxDetection(isTaxable = detected, isAutoDetected = true)
   }
 
-  /**
-   * Extrae un factor de empaque (> 1) a partir de una cadena de unidad (ej. "Bulto x 12", "Caja 24", "Docena").
-   */
   fun extractPackUnitsFromUnitText(rawUnit: String?): Double? {
     if (rawUnit.isNullOrBlank()) return null
     val text = rawUnit.trim()
@@ -196,9 +167,6 @@ object PricingIntelligenceEngine {
     return null
   }
 
-  /**
-   * Extrae un posible factor de empaque desde el nombre del producto (ej. "RISTRA 12X24ML", "HARINA 1KG X 20").
-   */
   fun extractPackUnitsFromProductName(rawName: String?): Double? {
     if (rawName.isNullOrBlank()) return null
     val text = rawName.trim()
@@ -215,15 +183,15 @@ object PricingIntelligenceEngine {
   }
 
   /**
-   * Determina cuántas unidades contiene el precio del producto.
-   * Protege contra falsos positivos: si el catálogo viene con unidad genérica ("u") y el precio
-   * ya está en rango unitario respecto al PVP de Isaac POS, NO divide por el bulto del POS.
+   * Determina cuántas unidades contiene el precio del proveedor.
+   * Usa la referencia interna del producto sincronizado solo para evitar dividir por error
+   * precios que el vendedor ya cotizó por unidad.
    */
   fun detectPackUnits(
     producto: Producto,
     posProduct: IsaacPosProducto?,
     packCostUsdPreview: Double?,
-    posPvpUsd: Double?,
+    unitMagnitudeRefUsd: Double?,
   ): PackDetection {
     val manual = producto.unidadesPorEmpaque
     if (manual != null && manual > 0.0 && manual.isFinite()) {
@@ -231,13 +199,10 @@ object PricingIntelligenceEngine {
       return PackDetection(units = manual, isAutoDetected = false, label = label)
     }
 
-    // 1. Factor explícito en la unidad del propio producto del catálogo (ej. "Bulto x 12", "Caja x 24")
     val fromOwnUnit = extractPackUnitsFromUnitText(producto.unidad)
     if (fromOwnUnit != null && fromOwnUnit > 1.0) {
-      // Si el precio del catálogo es incluso menor que el PVP unitario (ej. catálogo puso unidad "Bulto x 12" pero precio unitario $0.40 con PVP $0.52),
-      // solo aceptar la división si el precio supera ~1.6x el PVP o no tenemos PVP para contrastar.
-      val looksAlreadyUnit = packCostUsdPreview != null && posPvpUsd != null && posPvpUsd > 0.0 &&
-        packCostUsdPreview <= posPvpUsd * 1.45 && (packCostUsdPreview / fromOwnUnit) < posPvpUsd * 0.25
+      val looksAlreadyUnit = packCostUsdPreview != null && unitMagnitudeRefUsd != null && unitMagnitudeRefUsd > 0.0 &&
+        packCostUsdPreview <= unitMagnitudeRefUsd * 1.45 && (packCostUsdPreview / fromOwnUnit) < unitMagnitudeRefUsd * 0.25
       if (!looksAlreadyUnit) {
         return PackDetection(
           units = fromOwnUnit,
@@ -247,27 +212,24 @@ object PricingIntelligenceEngine {
       }
     }
 
-    // 2. Si el precio del catálogo claramente corresponde a un bulto (supera 1.8x el PVP unitario del POS),
-    // intentar heredar el factor de la presentación de Isaac POS o del nombre.
-    val looksLikeBulkVsPvp = packCostUsdPreview != null && posPvpUsd != null && posPvpUsd > 0.0 &&
-      packCostUsdPreview > posPvpUsd * 1.8
+    val looksLikeBulk = packCostUsdPreview != null && unitMagnitudeRefUsd != null && unitMagnitudeRefUsd > 0.0 &&
+      packCostUsdPreview > unitMagnitudeRefUsd * 1.8
 
     val fromPosUnit = extractPackUnitsFromUnitText(posProduct?.unidadPedido)
     if (fromPosUnit != null && fromPosUnit > 1.0) {
       val unitSuggestsBulk = isBulkUnitKeyword(producto.unidad)
-      if (looksLikeBulkVsPvp || (unitSuggestsBulk && (posPvpUsd == null || packCostUsdPreview == null || packCostUsdPreview > posPvpUsd * 1.45))) {
+      if (looksLikeBulk || (unitSuggestsBulk && (unitMagnitudeRefUsd == null || packCostUsdPreview == null || packCostUsdPreview > unitMagnitudeRefUsd * 1.45))) {
         return PackDetection(
           units = fromPosUnit,
           isAutoDetected = true,
-          label = "POS ${posProduct?.unidadPedido?.trim()} (÷${formatFactor(fromPosUnit)})",
+          label = "${posProduct?.unidadPedido?.trim()} (÷${formatFactor(fromPosUnit)})",
         )
       }
     }
 
     val fromName = extractPackUnitsFromProductName(producto.nombre)
       ?: extractPackUnitsFromProductName(posProduct?.nombre)
-      ?: if (looksLikeBulkVsPvp) {
-        // Último recurso cuando el precio es claramente de caja/bulto: "(24)" en el nombre
+      ?: if (looksLikeBulk) {
         (nameParenthesizedCountRegex.find(producto.nombre)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
           ?: posProduct?.nombre?.let { nameParenthesizedCountRegex.find(it)?.groupValues?.getOrNull(1)?.toDoubleOrNull() })
           ?.takeIf { it in 2.0..200.0 }
@@ -275,11 +237,11 @@ object PricingIntelligenceEngine {
 
     if (fromName != null && fromName > 1.0) {
       val unitSuggestsBulk = isBulkUnitKeyword(producto.unidad)
-      if (looksLikeBulkVsPvp || (unitSuggestsBulk && (posPvpUsd == null || packCostUsdPreview == null || packCostUsdPreview > posPvpUsd * 1.45))) {
+      if (looksLikeBulk || (unitSuggestsBulk && (unitMagnitudeRefUsd == null || packCostUsdPreview == null || packCostUsdPreview > unitMagnitudeRefUsd * 1.45))) {
         return PackDetection(
           units = fromName,
           isAutoDetected = true,
-          label = "Detectado x ${formatFactor(fromName)} (÷${formatFactor(fromName)})",
+          label = "Empaque x ${formatFactor(fromName)} (÷${formatFactor(fromName)})",
         )
       }
     }
@@ -287,9 +249,6 @@ object PricingIntelligenceEngine {
     return PackDetection(units = 1.0, isAutoDetected = true, label = "Por unidad")
   }
 
-  /**
-   * Calcula el costo unitario en USD para un producto dado (usado también al guardar historial de precios).
-   */
   fun computeEffectiveUnitCostUsd(
     rawPrice: Double,
     producto: Producto,
@@ -317,20 +276,17 @@ object PricingIntelligenceEngine {
       ModoIvaCatalogo.TODO_CATALOGO -> true
     }
     val withIvaUsd = if (applyIva) baseUsd * (1.0 + ivaPct / 100.0) else baseUsd
-    val pvp = posProduct?.precioVenta ?: producto.precioVentaPos
-    val pack = detectPackUnits(producto, posProduct, withIvaUsd, pvp)
+    val unitRef = posProduct?.precioVenta ?: producto.precioVentaPos
+    val pack = detectPackUnits(producto, posProduct, withIvaUsd, unitRef)
     return (withIvaUsd / pack.units) to tasaAplicada
   }
 
-  /**
-   * Estima el costo unitario base registrado en `isaac_pos_cache` (respetando `unidad_pedido`, ej. "Bulto x 12").
-   */
   fun computePosBaselineUnitCostUsd(pos: IsaacPosProducto): Double? {
     val raw = pos.costoUnitario?.takeIf { it > 0.0 && it.isFinite() } ?: return null
     val posPack = extractPackUnitsFromUnitText(pos.unidadPedido) ?: 1.0
     if (posPack > 1.0) {
-      val pvp = pos.precioVenta
-      val looksAlreadyUnit = pvp != null && pvp > 0.0 && raw <= pvp * 1.35 && (raw / posPack) < pvp * 0.25
+      val unitRef = pos.precioVenta
+      val looksAlreadyUnit = unitRef != null && unitRef > 0.0 && raw <= unitRef * 1.35 && (raw / posPack) < unitRef * 0.25
       if (!looksAlreadyUnit) {
         return raw / posPack
       }
@@ -369,28 +325,9 @@ object PricingIntelligenceEngine {
       null
     }
 
-    val posPvp = posProduct?.precioVenta?.takeIf { it > 0.0 } ?: producto.precioVentaPos?.takeIf { it > 0.0 }
-    val packDetection = detectPackUnits(producto, posProduct, packUsd, posPvp)
+    val unitRef = posProduct?.precioVenta?.takeIf { it > 0.0 } ?: producto.precioVentaPos?.takeIf { it > 0.0 }
+    val packDetection = detectPackUnits(producto, posProduct, packUsd, unitRef)
     val unitCostUsd = packUsd?.let { it / packDetection.units }
-
-    val markupPct = if (unitCostUsd != null && unitCostUsd > 0.0 && posPvp != null) {
-      ((posPvp - unitCostUsd) / unitCostUsd) * 100.0
-    } else null
-
-    val grossMarginPct = if (unitCostUsd != null && posPvp != null && posPvp > 0.0) {
-      ((posPvp - unitCostUsd) / posPvp) * 100.0
-    } else null
-
-    val profitPerUnit = if (unitCostUsd != null && posPvp != null) posPvp - unitCostUsd else null
-    val suggestedPvp = unitCostUsd?.let { roundUp2Decimals(it * (1.0 + settings.targetMarkupPercent / 100.0)) }
-
-    val health = when {
-      unitCostUsd == null || posPvp == null -> MarginHealth.NO_PVP
-      posPvp <= unitCostUsd -> MarginHealth.LOSS
-      markupPct != null && markupPct <= settings.criticalMarkupPercent -> MarginHealth.CRITICAL
-      markupPct != null && markupPct < settings.targetMarkupPercent -> MarginHealth.BELOW_TARGET
-      else -> MarginHealth.HEALTHY
-    }
 
     val canonicalKey = canonicalKeyFor(producto, posProduct)
     val isPrimary = posProduct != null &&
@@ -415,12 +352,6 @@ object PricingIntelligenceEngine {
       rawPriceOriginal = rawPrice,
       packCostUsd = packUsd,
       effectiveUnitCostUsd = unitCostUsd,
-      posPvpUsd = posPvp,
-      markupPercent = markupPct,
-      grossMarginPercent = grossMarginPct,
-      profitPerUnitUsd = profitPerUnit,
-      suggestedPvpUsd = suggestedPvp,
-      health = health,
       stockPos = posProduct?.stockActual ?: producto.stockPos,
       isPrimaryPosSupplier = isPrimary,
       updatedAtMillis = catalogo?.importadoEn ?: proveedor.creadoEn,
@@ -454,7 +385,6 @@ object PricingIntelligenceEngine {
 
     val pricedOffers = allOffers.filter { it.effectiveUnitCostUsd != null && it.effectiveUnitCostUsd > 0.0 }
 
-    // Deduplicar ofertas del mismo proveedor para el mismo producto canónico (conserva el catálogo más reciente)
     val latestOfferPerKeyAndProvider = pricedOffers
       .groupBy { it.canonicalKey to it.proveedor.id }
       .mapValues { (_, list) ->
@@ -465,7 +395,7 @@ object PricingIntelligenceEngine {
 
     val offersByCanonicalKey = latestOfferPerKeyAndProvider.groupBy { it.canonicalKey }
 
-    // 1. Comparador multi-proveedor (productos ofrecidos por >= 2 proveedores distintos)
+    // 1. Comparador multi-proveedor (productos presentes en >= 2 proveedores)
     val comparisons = offersByCanonicalKey.mapNotNull { (key, offers) ->
       if (offers.size < 2) return@mapNotNull null
       val sorted = offers.sortedBy { it.effectiveUnitCostUsd!! }
@@ -480,7 +410,6 @@ object PricingIntelligenceEngine {
         displayName = cheapest.displayName,
         codigoBarra = cheapest.posProduct?.codigoBarra?.ifBlank { cheapest.producto.codigo } ?: cheapest.producto.codigo,
         stockPos = cheapest.stockPos,
-        posPvpUsd = cheapest.posPvpUsd,
         offers = sorted,
         cheapestOffer = cheapest,
         mostExpensiveOffer = expensive,
@@ -489,41 +418,7 @@ object PricingIntelligenceEngine {
       )
     }.sortedWith(compareByDescending<SupplierComparisonItem> { it.savingsPercent }.thenByDescending { it.savingsPerUnitUsd })
 
-    // 2. Monitor de márgenes y alertas de PVP
-    val marginAlerts = offersByCanonicalKey.mapNotNull { (key, offers) ->
-      val withPvp = offers.filter { it.posPvpUsd != null && it.effectiveUnitCostUsd != null }
-      if (withPvp.isEmpty()) return@mapNotNull null
-      // Priorizar el catálogo más reciente (o proveedor principal del POS si empatan) para evaluar el margen real vigente
-      val primary = withPvp.maxWith(
-        compareBy<EvaluatedOffer> { if (it.catalogo != null) 1 else 0 }
-          .thenBy { it.updatedAtMillis }
-          .thenBy { if (it.isPrimaryPosSupplier) 1 else 0 }
-      )
-      val cheapest = withPvp.minByOrNull { it.effectiveUnitCostUsd!! }
-      val altCheaper = if (cheapest != null &&
-        cheapest.proveedor.id != primary.proveedor.id &&
-        cheapest.effectiveUnitCostUsd!! < primary.effectiveUnitCostUsd!! - 0.005
-      ) {
-        cheapest
-      } else null
-
-      val pvpDiff = if (primary.suggestedPvpUsd != null && primary.posPvpUsd != null) {
-        primary.suggestedPvpUsd - primary.posPvpUsd
-      } else null
-
-      MarginAlertItem(
-        canonicalKey = key,
-        primaryOffer = primary,
-        cheaperAlternative = altCheaper,
-        pvpDiffUsd = pvpDiff,
-      )
-    }.sortedWith(
-      compareBy<MarginAlertItem> { it.primaryOffer.health.sortPriority }
-        .thenBy { it.primaryOffer.markupPercent ?: Double.MAX_VALUE }
-        .thenBy { it.primaryOffer.displayName.lowercase() }
-    )
-
-    // 3. Historial de subidas y bajadas
+    // 2. Variaciones de costo de proveedores
     val priceChanges = buildPriceChanges(
       historialPrecios = historialPrecios,
       latestOffers = latestOfferPerKeyAndProvider,
@@ -533,13 +428,8 @@ object PricingIntelligenceEngine {
     return PricingIntelligenceSummary(
       allOffers = allOffers,
       comparisons = comparisons,
-      marginAlerts = marginAlerts,
       priceChanges = priceChanges,
-      criticalOrLossCount = marginAlerts.count {
-        it.primaryOffer.health == MarginHealth.LOSS || it.primaryOffer.health == MarginHealth.CRITICAL
-      },
-      belowTargetCount = marginAlerts.count { it.primaryOffer.health == MarginHealth.BELOW_TARGET },
-      healthyCount = marginAlerts.count { it.primaryOffer.health == MarginHealth.HEALTHY },
+      priceIncreaseCount = priceChanges.count { it.isIncrease },
       missingRateOffersCount = allOffers.count { it.missingExchangeRate },
     )
   }
@@ -552,7 +442,6 @@ object PricingIntelligenceEngine {
     val changes = mutableListOf<PriceChangeItem>()
     val coveredKeys = mutableSetOf<String>()
 
-    // 3A. Cambios reales entre registros de historial_precios (mismo proveedor + mismo producto)
     val groupedHistory = historialPrecios
       .filter { it.costoUnitarioUsd > 0.0 }
       .groupBy { h ->
@@ -566,7 +455,6 @@ object PricingIntelligenceEngine {
       if (entries.size < 2) continue
       val ordered = entries.sortedWith(compareByDescending<HistorialPrecio> { it.registradoEn }.thenByDescending { it.id })
       val current = ordered.first()
-      // Buscar el registro anterior más reciente con un costo diferente o catálogo distinto
       val previous = ordered.drop(1).firstOrNull { prev ->
         abs(current.costoUnitarioUsd - prev.costoUnitarioUsd) >= 0.005
       } ?: continue
@@ -595,11 +483,9 @@ object PricingIntelligenceEngine {
       coveredKeys.add(groupKey)
     }
 
-    // 3B. Comparativa inmediata catálogo vs. costo guardado en Isaac POS cuando aún no hay 2 históricos
     for (offer in latestOffers) {
       val pos = offer.posProduct ?: continue
       val currentCost = offer.effectiveUnitCostUsd ?: continue
-      // Solo tiene sentido si viene de un catálogo importado o precio distinto al de POS
       if (offer.catalogo == null) continue
       val groupKey = "${offer.proveedor.id}|pos:${pos.productoId}"
       if (groupKey in coveredKeys) continue
@@ -634,12 +520,6 @@ object PricingIntelligenceEngine {
     )
   }
 
-  /**
-   * Construye el plan de Pedido Óptimo multi-proveedor.
-   * Por defecto toma productos en bajo stock (`stockPos <= lowStockThreshold`) con precio válido,
-   * preselecciona el proveedor más barato respetando `minSavingsPercent` frente al proveedor principal del POS,
-   * y permite overrides manuales de proveedor, cantidades y exclusiones.
-   */
   fun buildOptimalOrderPlan(
     allOffers: List<EvaluatedOffer>,
     lowStockThreshold: Double,
@@ -742,9 +622,6 @@ object PricingIntelligenceEngine {
     )
   }
 
-  /**
-   * Convierte un `OptimalOrderPlan` en una lista de borradores de `Pedido` (uno por proveedor ganador).
-   */
   fun buildDraftPedidosFromPlan(
     plan: OptimalOrderPlan,
     nowMillis: Long = System.currentTimeMillis(),
@@ -796,8 +673,6 @@ object PricingIntelligenceEngine {
       lower.startsWith("paca") ||
       lower.startsWith("docena")
   }
-
-  private fun roundUp2Decimals(value: Double): Double = ceil(value * 100.0 - 1e-9) / 100.0
 
   private fun formatFactor(valNum: Double): String =
     if (abs(valNum - valNum.toLong()) < 1e-6) valNum.toLong().toString() else "%.2f".format(valNum)

@@ -447,20 +447,16 @@ class AppViewModel(
   fun savePricingSettings(
     tasaBsPorUsd: Double,
     tasaSourceLabel: String,
-    targetMarkupPercent: Double,
-    criticalMarkupPercent: Double,
     defaultIvaPercent: Double = 16.0,
     minOptimalSavingsPercent: Double = 3.0,
   ) {
     pricingSettingsStore.saveSettings(
       tasaBsPorUsd = tasaBsPorUsd,
       tasaSourceLabel = tasaSourceLabel,
-      targetMarkupPercent = targetMarkupPercent,
-      criticalMarkupPercent = criticalMarkupPercent,
       defaultIvaPercent = defaultIvaPercent,
       minOptimalSavingsPercent = minOptimalSavingsPercent,
     )
-    showMessage("Configuración de precios y márgenes guardada")
+    showMessage("Configuración de tasa e IVA guardada")
   }
 
   fun updateMinOptimalSavingsPercent(percent: Double) {

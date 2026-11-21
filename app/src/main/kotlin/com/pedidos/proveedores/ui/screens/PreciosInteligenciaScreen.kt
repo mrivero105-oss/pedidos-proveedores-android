@@ -24,14 +24,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.CompareArrows
-import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.automirrored.rounded.TrendingDown
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Search
@@ -42,13 +38,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -63,7 +57,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -73,8 +66,6 @@ import com.pedidos.proveedores.data.local.PricingSettings
 import com.pedidos.proveedores.domain.model.MonedaCatalogo
 import com.pedidos.proveedores.domain.parser.PriceParser
 import com.pedidos.proveedores.domain.pricing.EvaluatedOffer
-import com.pedidos.proveedores.domain.pricing.MarginAlertItem
-import com.pedidos.proveedores.domain.pricing.MarginHealth
 import com.pedidos.proveedores.domain.pricing.OptimalOrderLine
 import com.pedidos.proveedores.domain.pricing.OptimalOrderPlan
 import com.pedidos.proveedores.domain.pricing.PriceChangeItem
@@ -89,21 +80,14 @@ import com.pedidos.proveedores.ui.theme.HeroGradientEndLight
 import com.pedidos.proveedores.ui.theme.HeroGradientStartDark
 import com.pedidos.proveedores.ui.theme.HeroGradientStartLight
 import com.pedidos.proveedores.ui.theme.LowStockAmber
-import com.pedidos.proveedores.ui.theme.WhatsAppGreen
 import com.pedidos.proveedores.ui.theme.ZeroStockRed
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private const val SUBTAB_MARGENES = 0
-private const val SUBTAB_COMPARADOR = 1
-private const val SUBTAB_SUBIDAS = 2
-private const val SUBTAB_OPTIMO = 3
-
-private const val MARGIN_FILTER_ALERTAS = 0
-private const val MARGIN_FILTER_CRITICOS = 1
-private const val MARGIN_FILTER_BAJO_META = 2
-private const val MARGIN_FILTER_TODOS = 3
+private const val SUBTAB_COMPARADOR = 0
+private const val SUBTAB_SUBIDAS = 1
+private const val SUBTAB_OPTIMO = 2
 
 private const val CHANGE_FILTER_TODAS = 0
 private const val CHANGE_FILTER_SUBIERON = 1
@@ -120,22 +104,16 @@ fun PreciosInteligenciaScreen(
   onSavePricingSettings: (
     tasaBsPorUsd: Double,
     tasaSourceLabel: String,
-    targetMarkupPercent: Double,
-    criticalMarkupPercent: Double,
     defaultIvaPercent: Double,
     minOptimalSavingsPercent: Double,
   ) -> Unit,
   onUpdateMinSavingsPercent: (Double) -> Unit,
   onUpdateProductPackTax: (productoId: Long, unidadesPorEmpaque: Double?, esGravado: Boolean?) -> Unit,
-  onCopyPvpList: (List<MarginAlertItem>) -> Unit,
-  onSharePvpWhatsApp: (List<MarginAlertItem>) -> Unit,
-  onExportPvpCsv: (List<MarginAlertItem>) -> Unit,
   onCreateOptimalDrafts: (OptimalOrderPlan) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  var selectedSubTab by rememberSaveable { mutableIntStateOf(SUBTAB_MARGENES) }
+  var selectedSubTab by rememberSaveable { mutableIntStateOf(SUBTAB_COMPARADOR) }
   var searchQuery by remember { mutableStateOf("") }
-  var marginFilter by rememberSaveable { mutableIntStateOf(MARGIN_FILTER_ALERTAS) }
   var changeFilter by rememberSaveable { mutableIntStateOf(CHANGE_FILTER_TODAS) }
   var onlyLowStockOptimal by rememberSaveable { mutableStateOf(true) }
 
@@ -154,29 +132,6 @@ fun PreciosInteligenciaScreen(
       item.displayName.contains(queryTrim, ignoreCase = true) ||
         item.codigoBarra.contains(queryTrim, ignoreCase = true) ||
         item.offers.any { it.proveedor.nombre.contains(queryTrim, ignoreCase = true) }
-    }
-  }
-
-  val filteredMargins = remember(summary.marginAlerts, marginFilter, queryTrim) {
-    val byStatus = when (marginFilter) {
-      MARGIN_FILTER_CRITICOS -> summary.marginAlerts.filter {
-        it.primaryOffer.health == MarginHealth.LOSS || it.primaryOffer.health == MarginHealth.CRITICAL
-      }
-      MARGIN_FILTER_BAJO_META -> summary.marginAlerts.filter {
-        it.primaryOffer.health == MarginHealth.BELOW_TARGET
-      }
-      MARGIN_FILTER_ALERTAS -> summary.marginAlerts.filter {
-        it.primaryOffer.health == MarginHealth.LOSS ||
-          it.primaryOffer.health == MarginHealth.CRITICAL ||
-          it.primaryOffer.health == MarginHealth.BELOW_TARGET
-      }
-      else -> summary.marginAlerts
-    }
-    if (queryTrim.isEmpty()) byStatus
-    else byStatus.filter { item ->
-      item.primaryOffer.displayName.contains(queryTrim, ignoreCase = true) ||
-        item.primaryOffer.proveedor.nombre.contains(queryTrim, ignoreCase = true) ||
-        item.primaryOffer.producto.codigo.contains(queryTrim, ignoreCase = true)
     }
   }
 
@@ -222,8 +177,7 @@ fun PreciosInteligenciaScreen(
     }
   }
 
-  val totalAlertasMargen = summary.criticalOrLossCount + summary.belowTargetCount
-  val totalSubidas = remember(summary.priceChanges) { summary.priceChanges.count { it.isIncrease } }
+  val totalSubidas = summary.priceIncreaseCount
   val isDark = isSystemInDarkTheme()
   val heroBrush = remember(isDark) {
     Brush.linearGradient(
@@ -237,7 +191,7 @@ fun PreciosInteligenciaScreen(
     contentPadding = PaddingValues(bottom = 28.dp),
     verticalArrangement = Arrangement.spacedBy(10.dp),
   ) {
-    // Hero compacto de Inteligencia de Compras
+    // Hero compacto 100% Compras a Proveedores
     item {
       Box(
         modifier = Modifier
@@ -253,17 +207,18 @@ fun PreciosInteligenciaScreen(
           ) {
             Column(modifier = Modifier.weight(1f)) {
               Text(
-                text = "Precios y Márgenes",
+                text = "Compras a Proveedores",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
               )
               Text(
-                text = "Comparador multi-proveedor, rentabilidad y pedido óptimo",
+                text = "Compara listas de vendedores, detecta subidas y reparte tu pedido al más barato",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.82f),
               )
             }
+            Spacer(Modifier.width(8.dp))
             Surface(
               color = Color.White.copy(alpha = 0.16f),
               shape = RoundedCornerShape(10.dp),
@@ -276,7 +231,7 @@ fun PreciosInteligenciaScreen(
                 Icon(Icons.Rounded.Tune, contentDescription = "Configurar", tint = Color.White, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(5.dp))
                 Text(
-                  text = "Meta +${PriceParser.formatQuantity(pricingSettings.targetMarkupPercent)}%",
+                  text = "Ajustes",
                   style = MaterialTheme.typography.labelMedium,
                   color = Color.White,
                   fontWeight = FontWeight.SemiBold,
@@ -285,7 +240,7 @@ fun PreciosInteligenciaScreen(
             }
           }
 
-          // Barra de Tasa BCV
+          // Barra de Tasa BCV (para listas en Bolívares)
           Surface(
             color = Color.White.copy(alpha = 0.14f),
             shape = RoundedCornerShape(10.dp),
@@ -314,7 +269,7 @@ fun PreciosInteligenciaScreen(
                   color = Color.White,
                   fontWeight = FontWeight.SemiBold,
                 )
-                val sourceInfo = pricingSettings.tasaSourceLabel.ifBlank { "Toca para ingresar o actualizar BCV" }
+                val sourceInfo = pricingSettings.tasaSourceLabel.ifBlank { "Para comparar listas en Bs. vs. USD" }
                 Text(
                   text = sourceInfo,
                   style = MaterialTheme.typography.labelSmall,
@@ -343,22 +298,11 @@ fun PreciosInteligenciaScreen(
             }
           }
 
-          // 3 KPIs rápidos
+          // 3 KPIs puros de compras a proveedores
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
           ) {
-            PricingHeroKpi(
-              value = totalAlertasMargen.toString(),
-              label = if (summary.criticalOrLossCount > 0) "${summary.criticalOrLossCount} críticos" else "Alertas PVP",
-              accent = when {
-                summary.criticalOrLossCount > 0 -> Color(0xFFFCA5A5)
-                summary.belowTargetCount > 0 -> Color(0xFFFCD34D)
-                else -> Color(0xFF6EE7B7)
-              },
-              onClick = { selectedSubTab = SUBTAB_MARGENES },
-              modifier = Modifier.weight(1f),
-            )
             PricingHeroKpi(
               value = summary.comparisons.size.toString(),
               label = "Comparables",
@@ -368,9 +312,16 @@ fun PreciosInteligenciaScreen(
             )
             PricingHeroKpi(
               value = totalSubidas.toString(),
-              label = "Subidas",
+              label = "Subidas costo",
               accent = if (totalSubidas > 0) Color(0xFFFCD34D) else Color(0xFF6EE7B7),
               onClick = { selectedSubTab = SUBTAB_SUBIDAS },
+              modifier = Modifier.weight(1f),
+            )
+            PricingHeroKpi(
+              value = optimalPlan.lines.size.toString(),
+              label = "Pedido óptimo",
+              accent = Color(0xFF6EE7B7),
+              onClick = { selectedSubTab = SUBTAB_OPTIMO },
               modifier = Modifier.weight(1f),
             )
           }
@@ -395,7 +346,7 @@ fun PreciosInteligenciaScreen(
             Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = LowStockAmber, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-              text = "${summary.missingRateOffersCount} producto(s) en Bolívares esperan tasa Bs/USD.",
+              text = "${summary.missingRateOffersCount} producto(s) de listas en Bolívares esperan tasa Bs/USD.",
               style = MaterialTheme.typography.bodySmall,
               modifier = Modifier.weight(1f),
             )
@@ -407,19 +358,12 @@ fun PreciosInteligenciaScreen(
       }
     }
 
-    // 4 sub-pestañas
+    // 3 sub-pestañas 100% enfocadas en compras a proveedores
     item {
       LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        item {
-          FilterChip(
-            selected = selectedSubTab == SUBTAB_MARGENES,
-            onClick = { selectedSubTab = SUBTAB_MARGENES },
-            label = { Text("Márgenes ($totalAlertasMargen)") },
-          )
-        }
         item {
           FilterChip(
             selected = selectedSubTab == SUBTAB_COMPARADOR,
@@ -467,134 +411,12 @@ fun PreciosInteligenciaScreen(
     }
 
     when (selectedSubTab) {
-      SUBTAB_MARGENES -> {
-        item {
-          LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            item {
-              FilterChip(
-                selected = marginFilter == MARGIN_FILTER_ALERTAS,
-                onClick = { marginFilter = MARGIN_FILTER_ALERTAS },
-                label = { Text("Alertas ($totalAlertasMargen)") },
-              )
-            }
-            item {
-              FilterChip(
-                selected = marginFilter == MARGIN_FILTER_CRITICOS,
-                onClick = { marginFilter = MARGIN_FILTER_CRITICOS },
-                label = { Text("Crítico/Pérdida (${summary.criticalOrLossCount})") },
-              )
-            }
-            item {
-              FilterChip(
-                selected = marginFilter == MARGIN_FILTER_BAJO_META,
-                onClick = { marginFilter = MARGIN_FILTER_BAJO_META },
-                label = { Text("Bajo meta (${summary.belowTargetCount})") },
-              )
-            }
-            item {
-              FilterChip(
-                selected = marginFilter == MARGIN_FILTER_TODOS,
-                onClick = { marginFilter = MARGIN_FILTER_TODOS },
-                label = { Text("Todos (${summary.marginAlerts.size})") },
-              )
-            }
-          }
-        }
-
-        if (filteredMargins.isNotEmpty()) {
-          item {
-            Card(
-              shape = RoundedCornerShape(12.dp),
-              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
-              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-              elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            ) {
-              Column(
-                modifier = Modifier.padding(10.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-              ) {
-                Text(
-                  text = "Exportar lista de PVP sugeridos (${filteredMargins.size} productos)",
-                  style = MaterialTheme.typography.labelMedium,
-                  fontWeight = FontWeight.SemiBold,
-                )
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                  OutlinedButton(
-                    onClick = { onCopyPvpList(filteredMargins) },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.weight(1f),
-                  ) {
-                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Copiar", style = MaterialTheme.typography.labelMedium)
-                  }
-                  FilledTonalButton(
-                    onClick = { onSharePvpWhatsApp(filteredMargins) },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.weight(1f),
-                  ) {
-                    Icon(
-                      Icons.AutoMirrored.Rounded.Send,
-                      contentDescription = null,
-                      tint = WhatsAppGreen,
-                      modifier = Modifier.size(15.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("WhatsApp", color = WhatsAppGreen, style = MaterialTheme.typography.labelMedium)
-                  }
-                  OutlinedButton(
-                    onClick = { onExportPvpCsv(filteredMargins) },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    modifier = Modifier.weight(1f),
-                  ) {
-                    Icon(Icons.Rounded.FileDownload, contentDescription = null, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("CSV", style = MaterialTheme.typography.labelMedium)
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        if (filteredMargins.isEmpty()) {
-          item {
-            EmptyPricingNotice(
-              title = if (summary.marginAlerts.isEmpty()) "Sin productos evaluados aún" else "Sin alertas en este filtro",
-              body = if (summary.marginAlerts.isEmpty()) {
-                "Sincroniza Isaac POS y concilia el catálogo de tus proveedores para ver tu ganancia real y el PVP sugerido."
-              } else {
-                "Todos tus productos en esta vista están cumpliendo tu meta de ganancia (+${PriceParser.formatQuantity(pricingSettings.targetMarkupPercent)}% s/costo)."
-              },
-            )
-          }
-        } else {
-          items(filteredMargins, key = { "margin_${it.canonicalKey}" }) { item ->
-            MarginAlertCard(
-              item = item,
-              targetMarkup = pricingSettings.targetMarkupPercent,
-              onEditPackTax = { editingPackOffer = item.primaryOffer },
-              modifier = Modifier.padding(horizontal = 16.dp),
-            )
-          }
-        }
-      }
-
       SUBTAB_COMPARADOR -> {
         if (filteredComparisons.isEmpty()) {
           item {
             EmptyPricingNotice(
               title = "Aún no hay productos compartidos entre 2+ proveedores",
-              body = "Cuando concilies el mismo producto de Isaac POS en catálogos de dos o más proveedores, aquí verás automáticamente quién vende más barato por unidad y cuánto ahorras.",
+              body = "Cuando concilies el mismo producto en las listas de dos o más proveedores, aquí verás automáticamente quién te vende más barato por unidad (ya normalizado por bulto, tasa Bs/USD e IVA).",
             )
           }
         } else {
@@ -635,8 +457,8 @@ fun PreciosInteligenciaScreen(
         if (filteredChanges.isEmpty()) {
           item {
             EmptyPricingNotice(
-              title = "Sin variaciones de precio detectadas",
-              body = "Cada vez que importes un catálogo nuevo o actualices un costo, la app guardará el historial automáticamente para avisarte qué subió o bajó frente al catálogo anterior y frente a Isaac POS.",
+              title = "Sin cambios de costo detectados",
+              body = "Cada vez que importes una lista nueva de un proveedor o actualices un costo, aquí se registrarán automáticamente las subidas y bajadas frente a su lista anterior.",
             )
           }
         } else {
@@ -718,27 +540,21 @@ fun PreciosInteligenciaScreen(
 
               HorizontalDivider()
 
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-              ) {
-                Column {
-                  Text(
-                    text = "${optimalPlan.lines.size} prod. en ${optimalPlan.buckets.size} proveedor(es)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                  )
-                  val saveTxt = if (optimalPlan.totalSavingsUsd > 0.01) {
-                    " · Ahorro est. ${PriceParser.formatCurrency(optimalPlan.totalSavingsUsd)}"
-                  } else ""
-                  Text(
-                    text = "Total est. ${PriceParser.formatCurrency(optimalPlan.totalEstimatedUsd)}$saveTxt",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (optimalPlan.totalSavingsUsd > 0.01) HealthyStockGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold,
-                  )
-                }
+              Column {
+                Text(
+                  text = "${optimalPlan.lines.size} prod. en ${optimalPlan.buckets.size} proveedor(es)",
+                  style = MaterialTheme.typography.bodyMedium,
+                  fontWeight = FontWeight.Bold,
+                )
+                val saveTxt = if (optimalPlan.totalSavingsUsd > 0.01) {
+                  " · Ahorro est. ${PriceParser.formatCurrency(optimalPlan.totalSavingsUsd)}"
+                } else ""
+                Text(
+                  text = "Total est. ${PriceParser.formatCurrency(optimalPlan.totalEstimatedUsd)}$saveTxt",
+                  style = MaterialTheme.typography.labelMedium,
+                  color = if (optimalPlan.totalSavingsUsd > 0.01) HealthyStockGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                  fontWeight = FontWeight.SemiBold,
+                )
               }
 
               if (optimalPlan.buckets.isNotEmpty()) {
@@ -782,11 +598,11 @@ fun PreciosInteligenciaScreen(
         if (filteredOptimalLines.isEmpty()) {
           item {
             EmptyPricingNotice(
-              title = if (onlyLowStockOptimal) "Sin productos en bajo stock con precio" else "Sin productos disponibles",
+              title = if (onlyLowStockOptimal) "Sin productos en bajo stock con costo" else "Sin productos disponibles",
               body = if (onlyLowStockOptimal) {
-                "No tienes productos en bajo stock con costo cargado. Puedes desactivar \"Solo productos en bajo stock\" arriba para planificar una compra completa."
+                "No tienes productos en bajo stock con costo cargado. Desactiva \"Solo productos en bajo stock\" arriba para planificar un pedido completo entre tus proveedores."
               } else {
-                "Importa o sincroniza productos con precio para armar un Pedido Óptimo multi-proveedor."
+                "Importa o sincroniza productos con costo para armar un Pedido Óptimo multi-proveedor."
               },
             )
           }
@@ -871,176 +687,6 @@ private fun PricingHeroKpi(
 }
 
 @Composable
-private fun MarginAlertCard(
-  item: MarginAlertItem,
-  targetMarkup: Double,
-  onEditPackTax: () -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  val o = item.primaryOffer
-  val statusColor = when (o.health) {
-    MarginHealth.LOSS, MarginHealth.CRITICAL -> ZeroStockRed
-    MarginHealth.BELOW_TARGET -> LowStockAmber
-    MarginHealth.HEALTHY -> HealthyStockGreen
-    MarginHealth.NO_PVP -> MaterialTheme.colorScheme.outline
-  }
-
-  Card(
-    shape = RoundedCornerShape(12.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    border = BorderStroke(1.dp, statusColor.copy(alpha = 0.38f)),
-    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    modifier = modifier.fillMaxWidth(),
-  ) {
-    Column(
-      modifier = Modifier.padding(12.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        Column(modifier = Modifier.weight(1f)) {
-          Text(
-            text = o.displayName,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-          )
-          Text(
-            text = buildString {
-              append(o.proveedor.nombre)
-              o.stockPos?.let { append(" · Stock: ${PriceParser.formatQuantity(it)}") }
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-        Spacer(Modifier.width(8.dp))
-        Surface(
-          color = statusColor.copy(alpha = 0.14f),
-          shape = RoundedCornerShape(8.dp),
-        ) {
-          Text(
-            text = o.health.etiqueta,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = statusColor,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-          )
-        }
-      }
-
-      // Costo u. | PVP actual | PVP sugerido
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(10.dp))
-          .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-          .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        MetricColumn(
-          label = "Costo u.",
-          value = o.effectiveUnitCostUsd?.let { PriceParser.formatCurrency(it) } ?: "-",
-          valueColor = MaterialTheme.colorScheme.onSurface,
-        )
-        MetricColumn(
-          label = "PVP POS",
-          value = o.posPvpUsd?.let { PriceParser.formatCurrency(it) } ?: "-",
-          valueColor = statusColor,
-        )
-        MetricColumn(
-          label = "PVP +${PriceParser.formatQuantity(targetMarkup)}%",
-          value = o.suggestedPvpUsd?.let { PriceParser.formatCurrency(it) } ?: "-",
-          valueColor = MaterialTheme.colorScheme.primary,
-        )
-      }
-
-      // Ambos indicadores: % sobre costo y % sobre PVP
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        val markupStr = o.markupPercent?.let { "${if (it >= 0) "+" else ""}${"%.1f".format(Locale.US, it)}% s/costo" } ?: "-"
-        val grossStr = o.grossMarginPercent?.let { "${"%.1f".format(Locale.US, it)}% s/PVP" } ?: "-"
-        val profitStr = o.profitPerUnitUsd?.let {
-          val sign = if (it >= 0) "+" else "-"
-          " ($sign${PriceParser.formatCurrency(kotlin.math.abs(it))}/u)"
-        }.orEmpty()
-        Text(
-          text = "$markupStr · $grossStr$profitStr",
-          style = MaterialTheme.typography.labelMedium,
-          fontWeight = FontWeight.SemiBold,
-          color = statusColor,
-        )
-      }
-
-      // Alternativa más barata si existe otro proveedor
-      item.cheaperAlternative?.let { alt ->
-        Surface(
-          color = HealthyStockGreen.copy(alpha = 0.10f),
-          shape = RoundedCornerShape(8.dp),
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = HealthyStockGreen, modifier = Modifier.size(15.dp))
-            Spacer(Modifier.width(6.dp))
-            val altCost = alt.effectiveUnitCostUsd?.let { PriceParser.formatCurrency(it) } ?: "-"
-            val altMarkup = alt.markupPercent?.let { " (+${"%.1f".format(Locale.US, it)}% s/costo)" }.orEmpty()
-            Text(
-              text = "${alt.proveedor.nombre} lo ofrece a $altCost$altMarkup",
-              style = MaterialTheme.typography.labelSmall,
-              color = HealthyStockGreen,
-              fontWeight = FontWeight.SemiBold,
-            )
-          }
-        }
-      }
-
-      // Pie de detalle empaque / moneda / IVA (tocable para corregir)
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        val rawInfo = buildString {
-          append(o.packDetection.label)
-          if (o.moneda == MonedaCatalogo.VES && o.rawPriceOriginal != null) {
-            append(" · Bs. ${PriceParser.formatQuantity(o.rawPriceOriginal)}")
-          }
-          if (o.ivaApplied) {
-            append(" · +${PriceParser.formatQuantity(o.ivaPercentApplied)}% IVA")
-          } else if (o.taxDetection.isTaxable) {
-            append(" · (G)")
-          }
-        }
-        Text(
-          text = rawInfo,
-          style = MaterialTheme.typography.labelSmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-          modifier = Modifier.weight(1f),
-        )
-        TextButton(
-          onClick = onEditPackTax,
-          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-        ) {
-          Text("Ajustar empaque/IVA", style = MaterialTheme.typography.labelSmall)
-        }
-      }
-    }
-  }
-}
-
-@Composable
 private fun SupplierComparisonCard(
   item: SupplierComparisonItem,
   onEditOfferPackTax: (EvaluatedOffer) -> Unit,
@@ -1072,8 +718,7 @@ private fun SupplierComparisonCard(
           )
           val meta = buildList {
             if (item.codigoBarra.isNotBlank()) add("Cód: ${item.codigoBarra}")
-            item.stockPos?.let { add("Stock: ${PriceParser.formatQuantity(it)}") }
-            item.posPvpUsd?.let { add("PVP: ${PriceParser.formatCurrency(it)}") }
+            item.stockPos?.let { add("Stock actual: ${PriceParser.formatQuantity(it)}") }
           }.joinToString(" · ")
           if (meta.isNotBlank()) {
             Text(
@@ -1121,16 +766,14 @@ private fun SupplierComparisonCard(
               verticalAlignment = Alignment.CenterVertically,
             ) {
               Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Text(
-                    text = if (isBest) "★ ${offer.proveedor.nombre}" else offer.proveedor.nombre,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = if (isBest) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isBest) HealthyStockGreen else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                  )
-                }
+                Text(
+                  text = if (isBest) "★ ${offer.proveedor.nombre}" else offer.proveedor.nombre,
+                  style = MaterialTheme.typography.bodySmall,
+                  fontWeight = if (isBest) FontWeight.Bold else FontWeight.Medium,
+                  color = if (isBest) HealthyStockGreen else MaterialTheme.colorScheme.onSurface,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
                 val detail = buildList {
                   add(offer.packDetection.label)
                   if (offer.moneda == MonedaCatalogo.VES && offer.rawPriceOriginal != null) {
@@ -1174,6 +817,11 @@ private fun SupplierComparisonCard(
           }
         }
       }
+      Text(
+        text = "Toca cualquier proveedor arriba para ajustar empaque o IVA si hace falta.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
     }
   }
 }
@@ -1304,7 +952,6 @@ private fun OptimalOrderLineCard(
         }
       }
 
-      // Selector de proveedor (si hay 2+ opciones muestra chips comparables; si solo 1 muestra etiqueta)
       if (line.allOffers.size > 1) {
         FlowRow(
           horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1379,27 +1026,6 @@ private fun OptimalOrderLineCard(
         }
       }
     }
-  }
-}
-
-@Composable
-private fun MetricColumn(
-  label: String,
-  value: String,
-  valueColor: Color,
-) {
-  Column(horizontalAlignment = Alignment.Start) {
-    Text(
-      text = label,
-      style = MaterialTheme.typography.labelSmall,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Text(
-      text = value,
-      style = MaterialTheme.typography.bodyMedium,
-      fontWeight = FontWeight.Bold,
-      color = valueColor,
-    )
   }
 }
 

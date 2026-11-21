@@ -31,7 +31,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -52,8 +51,6 @@ fun PricingSettingsDialog(
   onSave: (
     tasaBsPorUsd: Double,
     tasaSourceLabel: String,
-    targetMarkupPercent: Double,
-    criticalMarkupPercent: Double,
     defaultIvaPercent: Double,
     minOptimalSavingsPercent: Double,
   ) -> Unit,
@@ -66,13 +63,10 @@ fun PricingSettingsDialog(
       } else ""
     )
   }
-  var targetMarkupText by remember { mutableStateOf(PriceParser.formatQuantity(currentSettings.targetMarkupPercent)) }
-  var criticalMarkupText by remember { mutableStateOf(PriceParser.formatQuantity(currentSettings.criticalMarkupPercent)) }
   var ivaText by remember { mutableStateOf(PriceParser.formatQuantity(currentSettings.defaultIvaPercent)) }
   var minSavingsText by remember { mutableStateOf(PriceParser.formatQuantity(currentSettings.minOptimalSavingsPercent)) }
   var lastSource by remember { mutableStateOf(currentSettings.tasaSourceLabel) }
 
-  // Actualizar el campo cuando llega la tasa BCV en vivo
   LaunchedEffect(currentSettings.tasaBsPorUsd, currentSettings.tasaUpdatedAtMillis) {
     if (currentSettings.hasValidExchangeRate) {
       rateText = "%.2f".format(Locale.US, currentSettings.tasaBsPorUsd)
@@ -82,7 +76,7 @@ fun PricingSettingsDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Tasa BCV y Metas de Margen") },
+    title = { Text("Tasa BCV e IVA de Compras") },
     text = {
       Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -104,7 +98,7 @@ fun PricingSettingsDialog(
           singleLine = true,
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
           supportingText = {
-            val info = if (lastSource.isNotBlank()) "Origen: $lastSource" else "Se usa para convertir catálogos en Bolívares"
+            val info = if (lastSource.isNotBlank()) "Origen: $lastSource" else "Convierte listas de proveedores en Bolívares para comparar en USD"
             Text(info)
           },
           modifier = Modifier.fillMaxWidth(),
@@ -128,36 +122,10 @@ fun PricingSettingsDialog(
         HorizontalDivider()
 
         Text(
-          text = "Rentabilidad y PVP sugerido",
+          text = "Reglas de comparación de proveedores",
           style = MaterialTheme.typography.labelLarge,
           fontWeight = FontWeight.SemiBold,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          OutlinedTextField(
-            value = targetMarkupText,
-            onValueChange = { targetMarkupText = it },
-            label = { Text("Meta % s/costo") },
-            placeholder = { Text("30") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.weight(1f),
-          )
-          OutlinedTextField(
-            value = criticalMarkupText,
-            onValueChange = { criticalMarkupText = it },
-            label = { Text("Crítico <= %") },
-            placeholder = { Text("15") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.weight(1f),
-          )
-        }
-        Text(
-          text = "PVP sugerido = Costo unitario × (1 + meta%). Debajo de la meta avisa en amarillo; debajo del crítico o a pérdida en rojo.",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           OutlinedTextField(
             value = ivaText,
@@ -179,7 +147,7 @@ fun PricingSettingsDialog(
           )
         }
         Text(
-          text = "Ahorro mínimo %: umbral en Pedido Óptimo para recomendar cambiar tu proveedor principal por otro más barato.",
+          text = "Ahorro mínimo %: umbral en Pedido Óptimo para recomendar cambiar de proveedor por otro más barato.",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -189,15 +157,11 @@ fun PricingSettingsDialog(
       Button(
         onClick = {
           val parsedRate = PriceParser.parse(rateText) ?: currentSettings.tasaBsPorUsd
-          val parsedTarget = PriceParser.parse(targetMarkupText) ?: currentSettings.targetMarkupPercent
-          val parsedCritical = PriceParser.parse(criticalMarkupText) ?: currentSettings.criticalMarkupPercent
           val parsedIva = PriceParser.parse(ivaText) ?: currentSettings.defaultIvaPercent
           val parsedMinSave = PriceParser.parse(minSavingsText) ?: currentSettings.minOptimalSavingsPercent
           onSave(
             parsedRate,
             lastSource.ifBlank { "Manual" },
-            parsedTarget,
-            parsedCritical,
             parsedIva,
             parsedMinSave,
           )
@@ -346,7 +310,6 @@ fun ProductPackTaxDialog(
       offer.producto.unidadesPorEmpaque?.let { PriceParser.formatQuantity(it) }.orEmpty()
     )
   }
-  // null = Auto, true = Gravado, false = Exento
   var taxOverride by remember { mutableStateOf<Boolean?>(offer.producto.esGravado) }
   val quickPacks = listOf(1.0, 6.0, 12.0, 20.0, 24.0)
 
@@ -377,7 +340,7 @@ fun ProductPackTaxDialog(
           singleLine = true,
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
           supportingText = {
-            Text("Ej: si el precio es por bulto de 12 unidades, coloca 12. Si es por unidad, coloca 1.")
+            Text("Ej: si el proveedor cotiza un bulto de 12 unidades, coloca 12. Si cotiza por unidad, coloca 1.")
           },
           modifier = Modifier.fillMaxWidth(),
         )
