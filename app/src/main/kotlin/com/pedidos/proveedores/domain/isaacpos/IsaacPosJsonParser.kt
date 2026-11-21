@@ -11,14 +11,35 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 
 /**
- * Parsea respuestas JSON de PostgREST (Supabase) tanto de la vista enriquecida
- * `v_isaac_pos_productos_por_proveedor` como de la tabla base `cloud_productos`.
+ * Parsea respuestas JSON de PostgREST (Supabase) de `cloud_proveedores`
+ * y `v_isaac_pos_productos_por_proveedor` (100% enfocado en proveedores, sin categorías).
  */
 object IsaacPosJsonParser {
 
   private val json = Json {
     ignoreUnknownKeys = true
     isLenient = true
+  }
+
+  fun parseProvidersArray(rawJson: String): List<RemoteProviderSeed> {
+    if (rawJson.isBlank()) return emptyList()
+    val array = runCatching { json.parseToJsonElement(rawJson).jsonArray }.getOrNull() ?: return emptyList()
+    val result = ArrayList<RemoteProviderSeed>(array.size)
+    for (element in array) {
+      val obj = runCatching { element.jsonObject }.getOrNull() ?: continue
+      val nombre = obj.str("nombre")
+      if (nombre.isBlank()) continue
+      val activoStr = (obj["activo"] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()
+      if (activoStr == "false" || activoStr == "0") continue
+      result.add(
+        RemoteProviderSeed(
+          nombre = nombre,
+          telefonoWhatsApp = obj.str("telefono_whatsapp"),
+          notas = obj.str("notas"),
+        )
+      )
+    }
+    return result
   }
 
   fun parseProductsArray(
@@ -49,7 +70,7 @@ object IsaacPosJsonParser {
           sucursalId = obj.str("sucursal_id").ifBlank { "principal" },
           codigoBarra = cleanBarcode,
           nombre = nombre,
-          categoria = obj.str("categoria"),
+          categoria = "",
           precioVenta = obj.dbl("precio_venta"),
           stockActual = obj.dbl("stock_actual") ?: 0.0,
           proveedorNombreRemoto = obj.str("proveedor_nombre"),

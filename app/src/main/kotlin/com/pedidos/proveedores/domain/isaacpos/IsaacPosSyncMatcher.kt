@@ -27,6 +27,12 @@ data class LocalProductPosUpdate(
 data class RemoteProviderSeed(
   val nombre: String,
   val telefonoWhatsApp: String,
+  val notas: String = "",
+)
+
+data class LocalProviderPhoneUpdate(
+  val proveedorId: Long,
+  val telefonoWhatsApp: String,
 )
 
 data class RemoteProductInsert(
@@ -37,18 +43,17 @@ data class RemoteProductInsert(
 data class IsaacPosSyncPlan(
   val localProductUpdates: List<LocalProductPosUpdate>,
   val providersToCreate: List<RemoteProviderSeed>,
+  val providersToUpdatePhone: List<LocalProviderPhoneUpdate> = emptyList(),
   val productsToInsertByProviderName: List<RemoteProductInsert>,
   val summary: IsaacPosSyncSummary,
 )
 
 /**
- * Motor puro (testeable en JVM) que cruza los productos descargados de Isaac POS (Supabase)
- * con los proveedores y catálogos ya cargados en el teléfono:
- * 1. Empareja primero por `isaacPosId` ya vinculado.
- * 2. Empareja automáticamente por `codigo_barra` (ej. catálogos PDF/Excel/Imágenes como Amanecer).
- * 3. Empareja por nombre normalizado exacto.
- * 4. Si en Supabase el producto ya tiene `proveedor_nombre` (desde `cloud_proveedores`),
- *    planifica la creación del proveedor y la inserción ordenada del producto.
+ * Motor puro (testeable en JVM) 100% enfocado en proveedores de Isaac POS:
+ * 1. Sincroniza todos los proveedores activos de `cloud_proveedores` (incluso los que aún no tienen productos).
+ * 2. Procesa únicamente productos asociados a un proveedor real (ignora productos sueltos de categorías).
+ * 3. Empareja productos locales existentes por `isaacPosId`, `codigo_barra` o nombre normalizado.
+ * 4. Inserta los productos faltantes dentro de su proveedor correspondiente sin cargar categorías.
  */
 object IsaacPosSyncMatcher {
 
@@ -56,8 +61,9 @@ object IsaacPosSyncMatcher {
     remoteProducts: List<IsaacPosProducto>,
     localProveedores: List<Proveedor>,
     localProductos: List<Producto>,
+    remoteProviders: List<RemoteProviderSeed> = emptyList(),
   ): IsaacPosSyncPlan {
-    val existingProvLower = localProveedores.map { normalizeKey(it.nombre) }.toMutableSet()
+    val existingProvByKey = localProveedores.associateBy { normalizeKey(it.nombre) }
     val localByPosId = localProductos
       .mapNotNull { p -> p.isaacPosId?.takeIf { it.isNotBlank() }?.let { it to p } }
       .groupBy({ it.first }, { it.second })
@@ -72,16 +78,56 @@ object IsaacPosSyncMatcher {
     val updates = mutableListOf<LocalProductPosUpdate>()
     val updatedLocalIds = mutableSetOf<Long>()
     val providersToCreate = linkedMapOf<String, RemoteProviderSeed>()
+    val providersToUpdatePhone = linkedMapOf<Long, LocalProviderPhoneUpdate>()
     val productsToInsert = mutableListOf<RemoteProductInsert>()
     val seenPosIdsForLowStock = mutableSetOf<String>()
 
+    // 1. Sembrar todos los proveedores activos recibidos de cloud_proveedores
+    for (seed in remoteProviders) {
+      val cleanName = seed.nombre.trim()
+      if (cleanName.isBlank()) continue
+      val key = normalizeKey(cleanName)
+      val existing = existingProvByKey[key]
+      if (existing == null) {
+        if (!providersToCreate.containsKey(key)) {
+          providersToCreate[key] = seed.copy(
+            nombre = cleanName,
+            telefonoWhatsApp = seed.telefonoWhatsApp.trim(),
+            notas = seed.notas.trim(),
+          )
+        }
+      } else if (existing.telefonoWhatsApp.isBlank() && seed.telefonoWhatsApp.isNotBlank()) {
+        providersToUpdatePhone[existing.id] = LocalProviderPhoneUpdate(
+          proveedorId = existing.id,
+          telefonoWhatsApp = seed.telefonoWhatsApp.trim(),
+        )
+      }
+    }
+
+    // 2. Procesar únicamente productos pertenecientes a un proveedor de Isaac POS
+    val providerOnlyProducts = remoteProducts.filter { it.proveedorNombreRemoto.isNotBlank() }
     var linkedByBarcodeCount = 0
-    var unassignedCount = 0
+    val ignoredWithoutProviderCount = remoteProducts.size - providerOnlyProducts.size
     var lowStockCount = 0
 
-    for (pos in remoteProducts) {
+    for (pos in providerOnlyProducts) {
       if (seenPosIdsForLowStock.add(pos.productoId) && pos.esBajoStock) {
         lowStockCount++
+      }
+
+      val remoteProvName = pos.proveedorNombreRemoto.trim()
+      val provKey = normalizeKey(remoteProvName)
+      val existingProv = existingProvByKey[provKey]
+      if (existingProv == null && !providersToCreate.containsKey(provKey)) {
+        providersToCreate[provKey] = RemoteProviderSeed(
+          nombre = remoteProvName,
+          telefonoWhatsApp = pos.proveedorTelefonoRemoto.trim(),
+        )
+      } else if (existingProv != null && existingProv.telefonoWhatsApp.isBlank() && pos.proveedorTelefonoRemoto.isNotBlank()) {
+        providersToUpdatePhone.putIfAbsent(
+          existingProv.id,
+          LocalProviderPhoneUpdate(existingProv.id, pos.proveedorTelefonoRemoto.trim()),
+        )
       }
 
       val byIdMatches = localByPosId[pos.productoId].orEmpty()
@@ -128,33 +174,21 @@ object IsaacPosSyncMatcher {
         continue
       }
 
-      // No estaba en catálogos locales: si viene con proveedor desde Supabase, crearlo/insertarlo ordenado
-      val remoteProvName = pos.proveedorNombreRemoto.trim()
-      if (remoteProvName.isNotBlank()) {
-        val provKey = normalizeKey(remoteProvName)
-        if (!existingProvLower.contains(provKey) && !providersToCreate.containsKey(provKey)) {
-          providersToCreate[provKey] = RemoteProviderSeed(
-            nombre = remoteProvName,
-            telefonoWhatsApp = pos.proveedorTelefonoRemoto.trim(),
-          )
-        }
-        productsToInsert.add(RemoteProductInsert(providerName = remoteProvName, posProduct = pos))
-      } else {
-        unassignedCount++
-      }
+      productsToInsert.add(RemoteProductInsert(providerName = remoteProvName, posProduct = pos))
     }
 
     return IsaacPosSyncPlan(
       localProductUpdates = updates,
       providersToCreate = providersToCreate.values.toList(),
+      providersToUpdatePhone = providersToUpdatePhone.values.toList(),
       productsToInsertByProviderName = productsToInsert,
       summary = IsaacPosSyncSummary(
-        totalDescargados = remoteProducts.size,
+        totalDescargados = providerOnlyProducts.size,
         productosActualizadosLocales = updates.size,
         vinculadosPorCodigoBarras = linkedByBarcodeCount,
         proveedoresNuevosDesdeSupabase = providersToCreate.size,
         productosNuevosDesdeSupabase = productsToInsert.size,
-        sinProveedorAsignado = unassignedCount,
+        sinProveedorAsignado = ignoredWithoutProviderCount,
         enBajoStock = lowStockCount,
       ),
     )

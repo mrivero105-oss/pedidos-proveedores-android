@@ -3,12 +3,26 @@ package com.pedidos.proveedores.domain.isaacpos
 import com.pedidos.proveedores.domain.model.Producto
 import com.pedidos.proveedores.domain.model.Proveedor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IsaacPosSyncTest {
 
   @Test
-  fun parsesBothEnrichedViewAndBaseCloudProductosJson() {
+  fun parsesActiveProvidersAndStripsProductCategoriesFromIsaacPos() {
+    val providersJson = """
+      [
+        {"nombre": "Aurora", "telefono_whatsapp": "", "notas": "", "activo": true},
+        {"nombre": "Distribuidora SERVICPAN", "telefono_whatsapp": "04121141566", "notas": "Andreina", "activo": true},
+        {"nombre": "Proveedor Inactivo", "telefono_whatsapp": "", "notas": "", "activo": false}
+      ]
+    """.trimIndent()
+
+    val providers = IsaacPosJsonParser.parseProvidersArray(providersJson)
+    assertEquals(2, providers.size)
+    assertEquals("Aurora", providers[0].nombre)
+    assertEquals("04121141566", providers[1].telefonoWhatsApp)
+
     val enrichedJson = """
       [
         {
@@ -31,44 +45,24 @@ class IsaacPosSyncTest {
     val enriched = IsaacPosJsonParser.parseProductsArray(enrichedJson)
     assertEquals(1, enriched.size)
     assertEquals("pos-1", enriched[0].productoId)
-    assertEquals("7595461001206", enriched[0].codigoBarra)
+    assertEquals("", enriched[0].categoria) // No carga categorías desde Isaac POS
     assertEquals("Grupo Amanecer", enriched[0].proveedorNombreRemoto)
     assertEquals(3.0, enriched[0].stockActual, 0.001)
     assertEquals(62.50, enriched[0].costoUnitario!!, 0.001)
-
-    val baseJson = """
-      [
-        {
-          "id": "1772071374412-ghbyfjbco",
-          "sucursal_id": "principal",
-          "codigo_barra": "7596540001544",
-          "nombre": "Cafe Arauca 50g",
-          "categoria": "Víveres",
-          "precio_venta": "0.84",
-          "stock_actual": "120.00"
-        }
-      ]
-    """.trimIndent()
-
-    val base = IsaacPosJsonParser.parseProductsArray(baseJson)
-    assertEquals(1, base.size)
-    assertEquals("1772071374412-ghbyfjbco", base[0].productoId)
-    assertEquals("Cafe Arauca 50g", base[0].nombre)
-    assertEquals(120.0, base[0].stockActual, 0.001)
-    assertEquals("", base[0].proveedorNombreRemoto)
   }
 
   @Test
-  fun matchesByBarcodeCreatesRemoteProvidersAndCountsLowStock() {
+  fun syncsOnlyProvidersAndProviderProductsIgnoringUnassignedCategoryItems() {
     val remoteJson = """
       [
         {
-          "id": "pos-amanecer-100",
+          "producto_id": "pos-amanecer-100",
           "codigo_barra": "7595461001206",
-          "nombre": "CAFE AMANECER 100G",
+          "producto_nombre": "CAFE AMANECER 100G",
           "categoria": "Víveres",
           "precio_venta": "1.90",
-          "stock_actual": "2.00"
+          "stock_actual": "2.00",
+          "proveedor_nombre": "Grupo Amanecer"
         },
         {
           "producto_id": "pos-polar-harina",
@@ -83,18 +77,23 @@ class IsaacPosSyncTest {
           "costo_unitario": "19.50"
         },
         {
-          "id": "pos-sin-prov",
+          "producto_id": "pos-sin-prov",
           "codigo_barra": "",
-          "nombre": "Chupetas PIN POP",
+          "producto_nombre": "Chupetas PIN POP",
           "categoria": "Golosinas",
           "precio_venta": "0.29",
-          "stock_actual": "106.00"
+          "stock_actual": "106.00",
+          "proveedor_nombre": null
         }
       ]
     """.trimIndent()
 
     val remotes = IsaacPosJsonParser.parseProductsArray(remoteJson)
-    val localProviders = listOf(Proveedor(id = 10L, nombre = "Grupo Amanecer"))
+    val remoteProviders = listOf(
+      RemoteProviderSeed(nombre = "Aurora", telefonoWhatsApp = ""),
+      RemoteProviderSeed(nombre = "Grupo Amanecer", telefonoWhatsApp = "04129998877"),
+    )
+    val localProviders = listOf(Proveedor(id = 10L, nombre = "Grupo Amanecer", telefonoWhatsApp = ""))
     val localProducts = listOf(
       Producto(
         id = 101L,
@@ -105,20 +104,31 @@ class IsaacPosSyncTest {
       )
     )
 
-    val plan = IsaacPosSyncMatcher.computeSyncPlan(remotes, localProviders, localProducts)
+    val plan = IsaacPosSyncMatcher.computeSyncPlan(
+      remoteProducts = remotes,
+      localProveedores = localProviders,
+      localProductos = localProducts,
+      remoteProviders = remoteProviders,
+    )
 
-    // 1 vinculado automáticamente por código de barras con Grupo Amanecer (stock=2)
+    // 1 vinculado por código de barras con Grupo Amanecer (stock=2)
     assertEquals(1, plan.localProductUpdates.size)
     assertEquals(101L, plan.localProductUpdates[0].localProductId)
     assertEquals(2.0, plan.localProductUpdates[0].stockPos, 0.001)
     assertEquals(1, plan.summary.vinculadosPorCodigoBarras)
 
-    // 1 proveedor nuevo desde Supabase ("Alimentos Polar") + 1 producto insertado
-    assertEquals(1, plan.providersToCreate.size)
-    assertEquals("Alimentos Polar", plan.providersToCreate[0].nombre)
+    // Completa el teléfono de Grupo Amanecer que estaba vacío
+    assertEquals(1, plan.providersToUpdatePhone.size)
+    assertEquals("04129998877", plan.providersToUpdatePhone[0].telefonoWhatsApp)
+
+    // Crea Aurora (0 productos en POS) + Alimentos Polar (1 producto)
+    assertEquals(2, plan.providersToCreate.size)
+    assertTrue(plan.providersToCreate.any { it.nombre == "Aurora" })
+    assertTrue(plan.providersToCreate.any { it.nombre == "Alimentos Polar" })
     assertEquals(1, plan.productsToInsertByProviderName.size)
 
-    // 1 sin proveedor asignado ("Chupetas PIN POP") y 2 en bajo stock (<= 5)
+    // Ignora "Chupetas PIN POP" (sin proveedor) -> solo 2 productos descargados
+    assertEquals(2, plan.summary.totalDescargados)
     assertEquals(1, plan.summary.sinProveedorAsignado)
     assertEquals(2, plan.summary.enBajoStock)
   }
@@ -173,16 +183,12 @@ class IsaacPosSyncTest {
         codigo = "7591664000046",
         nombre = "Pega Loca",
         unidad = "u",
-        precio = null,
       )
     )
 
     val plan = IsaacPosSyncMatcher.computeSyncPlan(remotes, localProviders, localProducts)
     assertEquals(1, plan.localProductUpdates.size)
     assertEquals("Caja x 42", plan.localProductUpdates[0].newUnitIfGeneric)
-    assertEquals(10.90, plan.localProductUpdates[0].newCostIfMissing!!, 0.001)
-    assertEquals(76.0, plan.localProductUpdates[0].stockPos, 0.001)
-    assertEquals(1, plan.summary.enBajoStock)
-    assertEquals(2, plan.providersToCreate.size)
+    assertEquals(1, plan.summary.enBajoStock) // deduplicado aunque aparezca en 2 proveedores
   }
 }

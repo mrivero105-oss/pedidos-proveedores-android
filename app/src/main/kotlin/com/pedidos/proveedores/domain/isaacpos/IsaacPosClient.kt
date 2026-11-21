@@ -8,15 +8,17 @@ import java.net.URL
 
 /**
  * Cliente REST de solo lectura hacia Supabase (PostgREST) para Isaac POS.
+ * Enfoque 100% proveedores:
+ * - Consulta `cloud_proveedores` (activos) para traer todos los proveedores de Isaac POS.
+ * - Consulta `v_isaac_pos_productos_por_proveedor` filtrando `proveedor_nombre=not.is.null`
+ *   para traer únicamente productos asociados a proveedores (sin categorías ni productos sueltos).
  * - Soporta tanto claves modernas `sb_publishable_...` como claves legacy `anon` JWT.
- * - Consulta primero la vista `v_isaac_pos_productos_por_proveedor` (con proveedores y costos).
- * - Si dicha vista aún no existe en Supabase (HTTP 404), hace fallback transparente a `cloud_productos`.
- * - Pagina automáticamente con header `Range` para traer más de 1,000 productos sin truncar.
  */
 class IsaacPosClient {
 
   data class FetchResult(
     val productos: List<IsaacPosProducto>,
+    val proveedores: List<RemoteProviderSeed> = emptyList(),
     val sourceLabel: String,
     val usedProviderView: Boolean,
   )
@@ -30,23 +32,20 @@ class IsaacPosClient {
       val key = apiKey.trim()
       require(key.isNotEmpty()) { "Ingresa la clave Publishable o Anon de Supabase." }
 
+      val provResp = httpGet(
+        url = "$baseUrl/rest/v1/cloud_proveedores?select=id&activo=eq.true&limit=1",
+        apiKey = key,
+      )
       val viewResp = httpGet(
-        url = "$baseUrl/rest/v1/v_isaac_pos_productos_por_proveedor?select=producto_id&limit=1",
+        url = "$baseUrl/rest/v1/v_isaac_pos_productos_por_proveedor?select=producto_id&proveedor_nombre=not.is.null&limit=1",
         apiKey = key,
       )
-      if (viewResp.status in 200..299) {
-        return@runCatching "Conexión exitosa (vista con proveedores activa)"
+      if (provResp.status in 200..299 && viewResp.status in 200..299) {
+        return@runCatching "Conexión exitosa (solo proveedores de Isaac POS activos)"
       }
 
-      val baseResp = httpGet(
-        url = "$baseUrl/rest/v1/cloud_productos?select=id&limit=1",
-        apiKey = key,
-      )
-      if (baseResp.status in 200..299) {
-        return@runCatching "Conexión exitosa con cloud_productos (modo base sin vista de proveedores)"
-      }
-
-      error(buildHttpErrorMessage(baseResp.status, baseResp.body))
+      val errResp = if (provResp.status !in 200..299) provResp else viewResp
+      error(buildHttpErrorMessage(errResp.status, errResp.body))
     }
   }
 
@@ -60,39 +59,41 @@ class IsaacPosClient {
     val key = apiKey.trim()
     require(key.isNotEmpty()) { "Configura tu clave Publishable o Anon de Supabase." }
 
-    // 1. Intentar la vista enriquecida ordenada por proveedor
-    onProgress(0, "Conectando con Isaac POS en Supabase...")
-    val viewProbe = fetchPaginated(
+    // 1. Traer todos los proveedores activos de Isaac POS (incluso los que aún no tienen productos)
+    onProgress(0, "Descargando proveedores de Isaac POS...")
+    val providersResp = httpGet(
+      url = "$baseUrl/rest/v1/cloud_proveedores?select=nombre,telefono_whatsapp,notas,activo&activo=eq.true&order=nombre.asc",
+      apiKey = key,
+    )
+    if (providersResp.status !in 200..299 && providersResp.status != 404) {
+      error(buildHttpErrorMessage(providersResp.status, providersResp.body))
+    }
+    val remoteProviders = if (providersResp.status in 200..299) {
+      IsaacPosJsonParser.parseProvidersArray(providersResp.body)
+    } else {
+      emptyList()
+    }
+
+    // 2. Traer únicamente los productos vinculados a un proveedor real (sin categorías ni sueltos)
+    onProgress(0, "Descargando productos de ${remoteProviders.size} proveedor(es)...")
+    val providerProducts = fetchPaginated(
       baseUrl = baseUrl,
-      resourcePath = "v_isaac_pos_productos_por_proveedor?select=*&order=proveedor_nombre.asc.nullslast,producto_nombre.asc",
+      resourcePath = "v_isaac_pos_productos_por_proveedor?select=*&proveedor_nombre=not.is.null&order=proveedor_nombre.asc,producto_nombre.asc",
       apiKey = key,
       defaultLowStock = defaultLowStock,
       onProgress = onProgress,
-    )
+    )?.filter { it.proveedorNombreRemoto.isNotBlank() }
 
-    if (viewProbe != null) {
+    if (providerProducts != null) {
       return@withContext FetchResult(
-        productos = viewProbe,
-        sourceLabel = "v_isaac_pos_productos_por_proveedor",
+        productos = providerProducts,
+        proveedores = remoteProviders,
+        sourceLabel = "cloud_proveedores + v_isaac_pos_productos_por_proveedor",
         usedProviderView = true,
       )
     }
 
-    // 2. Fallback automático a cloud_productos si el script SQL de proveedores aún no se aplicó
-    onProgress(0, "Leyendo cloud_productos de Isaac POS...")
-    val baseProducts = fetchPaginated(
-      baseUrl = baseUrl,
-      resourcePath = "cloud_productos?select=*&order=categoria.asc,nombre.asc",
-      apiKey = key,
-      defaultLowStock = defaultLowStock,
-      onProgress = onProgress,
-    ) ?: error("No se encontró la tabla cloud_productos en Supabase.")
-
-    FetchResult(
-      productos = baseProducts,
-      sourceLabel = "cloud_productos",
-      usedProviderView = false,
-    )
+    error("No se encontró la vista de proveedores en Supabase. Aplica el script SQL de proveedores de Isaac POS.")
   }
 
   /**

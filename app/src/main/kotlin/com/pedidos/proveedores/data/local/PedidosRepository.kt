@@ -8,6 +8,7 @@ import androidx.core.database.getLongOrNull
 import androidx.core.database.getStringOrNull
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosSyncMatcher
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosSyncSummary
+import com.pedidos.proveedores.domain.isaacpos.RemoteProviderSeed
 import com.pedidos.proveedores.domain.pricing.PricingIntelligenceEngine
 import com.pedidos.proveedores.domain.reconcile.CatalogReconciliationLink
 import com.pedidos.proveedores.domain.model.CatalogoArchivo
@@ -78,7 +79,10 @@ interface PedidosRepository {
 
   suspend fun deleteCatalogo(catalogoId: Long, eliminarProductosAsociados: Boolean)
 
-  suspend fun syncIsaacPosProducts(remoteProducts: List<IsaacPosProducto>): IsaacPosSyncSummary
+  suspend fun syncIsaacPosProducts(
+    remoteProducts: List<IsaacPosProducto>,
+    remoteProviders: List<RemoteProviderSeed> = emptyList(),
+  ): IsaacPosSyncSummary
   suspend fun assignIsaacPosProductsToProveedor(
     proveedorId: Long,
     posProducts: List<IsaacPosProducto>,
@@ -457,29 +461,34 @@ class SqlitePedidosRepository(
       reloadSync()
     }
 
-  override suspend fun syncIsaacPosProducts(remoteProducts: List<IsaacPosProducto>): IsaacPosSyncSummary =
+  override suspend fun syncIsaacPosProducts(
+    remoteProducts: List<IsaacPosProducto>,
+    remoteProviders: List<RemoteProviderSeed>,
+  ): IsaacPosSyncSummary =
     withContext(Dispatchers.IO) {
       val db = dbHelper.writableDatabase
       val existingProviders = loadProveedoresBasic(db)
       val existingProducts = loadProductos(db)
+      val providerProducts = remoteProducts.filter { it.proveedorNombreRemoto.isNotBlank() }
 
       val plan = IsaacPosSyncMatcher.computeSyncPlan(
-        remoteProducts = remoteProducts,
+        remoteProducts = providerProducts,
         localProveedores = existingProviders,
         localProductos = existingProducts,
+        remoteProviders = remoteProviders,
       )
 
       db.beginTransaction()
       try {
-        // 1. Reemplazar caché offline de Isaac POS para consultar los 952+ productos incluso sin red
+        // 1. Reemplazar caché offline de Isaac POS únicamente con productos de proveedores (sin categorías)
         db.delete("isaac_pos_cache", null, null)
-        for (pos in remoteProducts) {
+        for (pos in providerProducts) {
           val cv = ContentValues().apply {
             put("producto_id", pos.productoId)
             put("sucursal_id", pos.sucursalId)
             put("codigo_barra", pos.codigoBarra)
             put("nombre", pos.nombre)
-            put("categoria", pos.categoria)
+            put("categoria", "")
             if (pos.precioVenta != null) put("precio_venta", pos.precioVenta) else putNull("precio_venta")
             put("stock_actual", pos.stockActual)
             put("proveedor_nombre_remoto", pos.proveedorNombreRemoto)
@@ -497,7 +506,7 @@ class SqlitePedidosRepository(
           )
         }
 
-        // 2. Actualizar stock y vínculo de productos locales emparejados (por isaacPosId, código de barras o nombre)
+        // 2. Actualizar stock y vínculo de productos locales emparejados (limpiando categorías previas de POS)
         for (upd in plan.localProductUpdates) {
           val cv = ContentValues().apply {
             put("stock_pos", upd.stockPos)
@@ -508,8 +517,11 @@ class SqlitePedidosRepository(
           }
           db.update("productos", cv, "id = ?", arrayOf(upd.localProductId.toString()))
         }
+        // Limpiar categorías heredadas de Isaac POS en productos sincronizados sin catálogo local
+        val clearCatCv = ContentValues().apply { put("categoria", "") }
+        db.update("productos", clearCatCv, "catalogo_id IS NULL AND isaac_pos_id IS NOT NULL", null)
 
-        // 3. Crear proveedores remotos nuevos (definidos en cloud_proveedores en Supabase) e insertar sus productos
+        // 3. Crear todos los proveedores activos de Isaac POS (cloud_proveedores) y completar WhatsApp faltantes
         val provIdByNormName = existingProviders
           .associate { IsaacPosSyncMatcher.normalizeKey(it.nombre) to it.id }
           .toMutableMap()
@@ -519,12 +531,16 @@ class SqlitePedidosRepository(
             val cv = ContentValues().apply {
               put("nombre", newProv.nombre.trim())
               put("telefono_whatsapp", newProv.telefonoWhatsApp.trim())
-              put("notas", "Sincronizado desde Isaac POS")
+              put("notas", newProv.notas.trim().ifBlank { "Sincronizado desde Isaac POS" })
               put("creado_en", System.currentTimeMillis())
             }
             val id = db.insertOrThrow("proveedores", null, cv)
             provIdByNormName[key] = id
           }
+        }
+        for (phoneUpd in plan.providersToUpdatePhone) {
+          val cv = ContentValues().apply { put("telefono_whatsapp", phoneUpd.telefonoWhatsApp) }
+          db.update("proveedores", cv, "id = ?", arrayOf(phoneUpd.proveedorId.toString()))
         }
 
         for (insertItem in plan.productsToInsertByProviderName) {
@@ -537,7 +553,7 @@ class SqlitePedidosRepository(
             put("nombre", pos.nombre)
             put("unidad", pos.unidadPedido.ifBlank { "u" })
             if (pos.costoUnitario != null) put("precio", pos.costoUnitario) else putNull("precio")
-            put("categoria", pos.categoria)
+            put("categoria", "")
             put("stock_pos", pos.stockActual)
             if (pos.precioVenta != null) put("precio_venta_pos", pos.precioVenta) else putNull("precio_venta_pos")
             put("isaac_pos_id", pos.productoId)
@@ -587,7 +603,7 @@ class SqlitePedidosRepository(
             put("nombre", pos.nombre)
             put("unidad", pos.unidadPedido.ifBlank { "u" })
             if (pos.costoUnitario != null) put("precio", pos.costoUnitario) else putNull("precio")
-            put("categoria", pos.categoria)
+            put("categoria", "")
             put("stock_pos", pos.stockActual)
             if (pos.precioVenta != null) put("precio_venta_pos", pos.precioVenta) else putNull("precio_venta_pos")
             put("isaac_pos_id", pos.productoId)
@@ -928,7 +944,7 @@ class SqlitePedidosRepository(
              imagen_ruta, pagina_pdf, stock_pos, precio_venta_pos, isaac_pos_id,
              unidades_por_empaque, es_gravado
       FROM productos
-      ORDER BY LOWER(categoria) ASC, LOWER(nombre) ASC
+      ORDER BY LOWER(nombre) ASC
       """.trimIndent(),
       null,
     ).use { c ->

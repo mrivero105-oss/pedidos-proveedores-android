@@ -75,14 +75,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private const val UNASSIGNED_PROVIDER_LABEL = "Sin proveedor asignado"
-
-private enum class PosAssignFilter(val label: String) {
-  TODOS("Todos"),
-  CON_PROVEEDOR("Con proveedor"),
-  SIN_PROVEEDOR("Sin proveedor"),
-}
-
 private enum class PosStockFilter(val label: String) {
   TODOS("Todo stock"),
   CON_STOCK("Con stock (> 0)"),
@@ -92,7 +84,6 @@ private enum class PosStockFilter(val label: String) {
 
 private data class PosProviderGroup(
   val providerName: String,
-  val isAssigned: Boolean,
   val phone: String,
   val items: List<IsaacPosProducto>,
   val withStockCount: Int,
@@ -115,10 +106,8 @@ fun IsaacPosSyncScreen(
 ) {
   var showConfigDialog by remember { mutableStateOf(!settings.isConfigured) }
   var searchQuery by remember { mutableStateOf("") }
-  var assignFilter by remember { mutableStateOf(PosAssignFilter.TODOS) }
   var stockFilter by remember { mutableStateOf(PosStockFilter.TODOS) }
   var selectedProviderFilter by remember { mutableStateOf<String?>(null) }
-  var selectedCategory by remember { mutableStateOf<String?>(null) }
   var selectedPosIds by remember { mutableStateOf<Set<String>>(emptySet()) }
   var showAssignDialog by remember { mutableStateOf(false) }
   var showCreateProviderDialog by remember { mutableStateOf(false) }
@@ -141,17 +130,18 @@ fun IsaacPosSyncScreen(
       .associate { it.proveedor.nombre.trim().lowercase() to it.proveedor.telefonoWhatsApp.trim() }
   }
 
-  // Estadísticas rápidas del caché POS
-  val totalWithStock = remember(posProducts) { posProducts.count { it.stockActual > 0.0 } }
-  val totalWithProvider = remember(posProducts, providerNameByPosId) {
-    posProducts.count { item ->
+  // Solo productos pertenecientes a algún proveedor (cero categorías sueltas sin proveedor)
+  val providerProductsOnly = remember(posProducts, providerNameByPosId) {
+    posProducts.filter { item ->
       providerNameByPosId.containsKey(item.productoId) || item.proveedorNombreRemoto.isNotBlank()
     }
   }
 
+  val totalWithStock = remember(providerProductsOnly) { providerProductsOnly.count { it.stockActual > 0.0 } }
+
   // Lista de proveedores detectados para filtro directo en chips
-  val detectedProviders = remember(posProducts, providerNameByPosId) {
-    posProducts
+  val detectedProviders = remember(providerProductsOnly, providerNameByPosId) {
+    providerProductsOnly
       .mapNotNull { item ->
         providerNameByPosId[item.productoId] ?: item.proveedorNombreRemoto.takeIf { it.isNotBlank() }
       }
@@ -162,33 +152,16 @@ fun IsaacPosSyncScreen(
       .map { it.key to it.value }
   }
 
-  val categories = remember(posProducts) {
-    posProducts
-      .map { it.categoria.trim().ifBlank { "Sin categoría" } }
-      .groupingBy { it }
-      .eachCount()
-      .entries
-      .sortedByDescending { it.value }
-      .map { it.key to it.value }
-  }
-
   val filtered = remember(
-    posProducts,
+    providerProductsOnly,
     searchQuery,
-    assignFilter,
     stockFilter,
     selectedProviderFilter,
-    selectedCategory,
     providerNameByPosId,
     settings.lowStockThreshold,
   ) {
-    posProducts.filter { item ->
+    providerProductsOnly.filter { item ->
       val assignedProv = providerNameByPosId[item.productoId] ?: item.proveedorNombreRemoto.takeIf { it.isNotBlank() }
-      val matchesAssign = when (assignFilter) {
-        PosAssignFilter.TODOS -> true
-        PosAssignFilter.SIN_PROVEEDOR -> assignedProv == null
-        PosAssignFilter.CON_PROVEEDOR -> assignedProv != null
-      }
       val matchesProviderChip = selectedProviderFilter == null ||
         (assignedProv != null && assignedProv.equals(selectedProviderFilter, ignoreCase = true))
 
@@ -199,32 +172,24 @@ fun IsaacPosSyncScreen(
         PosStockFilter.EN_CERO -> item.stockActual <= 0.0
       }
 
-      val itemCat = item.categoria.trim().ifBlank { "Sin categoría" }
-      val matchesCategory = selectedCategory == null || itemCat.equals(selectedCategory, ignoreCase = true)
       val matchesQuery = searchQuery.isBlank() || run {
         val q = searchQuery.trim().lowercase()
         item.nombre.lowercase().contains(q) ||
           item.codigoBarra.lowercase().contains(q) ||
-          itemCat.lowercase().contains(q) ||
           assignedProv.orEmpty().lowercase().contains(q)
       }
-      matchesAssign && matchesProviderChip && matchesStock && matchesCategory && matchesQuery
+      matchesProviderChip && matchesStock && matchesQuery
     }
   }
 
-  // Agrupación visual por proveedor: primero proveedores reales A-Z, al final "Sin proveedor asignado"
+  // Agrupación visual 100% por proveedor A-Z
   val groupedByProvider = remember(filtered, providerNameByPosId, providerPhoneByNameLower) {
     filtered
       .groupBy { item ->
-        providerNameByPosId[item.productoId]
-          ?: item.proveedorNombreRemoto.takeIf { it.isNotBlank() }
-          ?: UNASSIGNED_PROVIDER_LABEL
+        providerNameByPosId[item.productoId] ?: item.proveedorNombreRemoto.trim()
       }
       .entries
-      .sortedWith(
-        compareBy<Map.Entry<String, List<IsaacPosProducto>>> { it.key == UNASSIGNED_PROVIDER_LABEL }
-          .thenBy { it.key.lowercase() }
-      )
+      .sortedBy { it.key.lowercase() }
       .map { (provName, items) ->
         val sortedItems = items.sortedWith(
           compareByDescending<IsaacPosProducto> { it.stockActual > 0.0 }
@@ -234,7 +199,6 @@ fun IsaacPosSyncScreen(
           ?: items.firstOrNull { it.proveedorTelefonoRemoto.isNotBlank() }?.proveedorTelefonoRemoto.orEmpty()
         PosProviderGroup(
           providerName = provName,
-          isAssigned = provName != UNASSIGNED_PROVIDER_LABEL,
           phone = phone,
           items = sortedItems,
           withStockCount = items.count { it.stockActual > 0.0 },
@@ -242,14 +206,14 @@ fun IsaacPosSyncScreen(
       }
   }
 
-  val selectedItems = remember(posProducts, selectedPosIds) {
-    posProducts.filter { it.productoId in selectedPosIds }
+  val selectedItems = remember(providerProductsOnly, selectedPosIds) {
+    providerProductsOnly.filter { it.productoId in selectedPosIds }
   }
 
   Scaffold(
     topBar = {
       TopAppBar(
-        title = { Text("Isaac POS (Supabase)") },
+        title = { Text("Proveedores de Isaac POS") },
         navigationIcon = {
           IconButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Volver")
@@ -319,14 +283,14 @@ fun IsaacPosSyncScreen(
           ) {
             Column(modifier = Modifier.weight(1f)) {
               Text(
-                text = if (posProducts.isEmpty()) "Conecta tu Supabase de Isaac POS"
-                else "${posProducts.size} productos · $totalWithStock con stock",
+                text = if (providerProductsOnly.isEmpty()) "Conecta tus proveedores de Isaac POS"
+                else "${detectedProviders.size} proveedores · ${providerProductsOnly.size} productos",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
               )
               Text(
-                text = if (posProducts.isEmpty()) "Última sync: $lastSyncText"
-                else "$totalWithProvider con proveedor · Sync: $lastSyncText",
+                text = if (providerProductsOnly.isEmpty()) "Última sync: $lastSyncText"
+                else "$totalWithStock con stock · Sync: $lastSyncText",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
               )
@@ -385,7 +349,7 @@ fun IsaacPosSyncScreen(
         }
       }
 
-      if (posProducts.isEmpty()) {
+      if (providerProductsOnly.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
           Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -399,12 +363,12 @@ fun IsaacPosSyncScreen(
               tint = MaterialTheme.colorScheme.primary,
             )
             Text(
-              "Aún no has sincronizado Isaac POS",
+              "Aún no has sincronizado proveedores de Isaac POS",
               style = MaterialTheme.typography.titleMedium,
               fontWeight = FontWeight.Bold,
             )
             Text(
-              "Configura la clave Publishable de tu proyecto Supabase y pulsa Sincronizar para traer tus productos con stock real ordenados por proveedor.",
+              "Configura la clave Publishable de tu proyecto Supabase y pulsa Sincronizar para traer únicamente tus proveedores activos y sus productos (sin categorías sueltas).",
               style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -418,7 +382,7 @@ fun IsaacPosSyncScreen(
         OutlinedTextField(
           value = searchQuery,
           onValueChange = { searchQuery = it },
-          placeholder = { Text("Buscar producto, proveedor, código o categoría...") },
+          placeholder = { Text("Buscar proveedor, producto o código...") },
           leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
           trailingIcon = if (searchQuery.isNotEmpty()) {
             {
@@ -433,18 +397,8 @@ fun IsaacPosSyncScreen(
         )
 
         Spacer(Modifier.height(8.dp))
-        // Fila 1: Filtro de asignación + filtro de stock real
+        // Fila 1: Filtro de stock para pedidos
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-          items(PosAssignFilter.entries) { filter ->
-            FilterChip(
-              selected = assignFilter == filter && selectedProviderFilter == null,
-              onClick = {
-                assignFilter = filter
-                selectedProviderFilter = null
-              },
-              label = { Text(filter.label) },
-            )
-          }
           items(PosStockFilter.entries) { sFilter ->
             val label = if (sFilter == PosStockFilter.BAJO_STOCK) {
               "Bajo stock (≤ ${PriceParser.formatQuantity(settings.lowStockThreshold)})"
@@ -462,7 +416,7 @@ fun IsaacPosSyncScreen(
           }
         }
 
-        // Fila 2: Chips de proveedores detectados para saltar directo a un proveedor
+        // Fila 2: Chips de proveedores de Isaac POS (sin categorías de productos)
         if (detectedProviders.isNotEmpty()) {
           LazyRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -481,9 +435,6 @@ fun IsaacPosSyncScreen(
                 selected = selectedProviderFilter.equals(provName, ignoreCase = true),
                 onClick = {
                   selectedProviderFilter = if (selectedProviderFilter.equals(provName, ignoreCase = true)) null else provName
-                  if (selectedProviderFilter != null) {
-                    assignFilter = PosAssignFilter.TODOS
-                  }
                 },
                 label = {
                   Text(
@@ -497,36 +448,13 @@ fun IsaacPosSyncScreen(
           }
         }
 
-        // Fila 3: Chips de categorías
-        if (categories.size > 1) {
-          LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.padding(top = 4.dp),
-          ) {
-            item {
-              FilterChip(
-                selected = selectedCategory == null,
-                onClick = { selectedCategory = null },
-                label = { Text("Todas cat.") },
-              )
-            }
-            items(categories) { (cat, count) ->
-              FilterChip(
-                selected = selectedCategory == cat,
-                onClick = { selectedCategory = if (selectedCategory == cat) null else cat },
-                label = { Text("$cat ($count)") },
-              )
-            }
-          }
-        }
-
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically,
         ) {
           Text(
-            text = "Mostrando ${filtered.size} producto(s) en ${groupedByProvider.size} grupo(s)",
+            text = "Mostrando ${filtered.size} producto(s) de ${groupedByProvider.size} proveedor(es)",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
@@ -555,14 +483,10 @@ fun IsaacPosSyncScreen(
             item(key = "header_${group.providerName}") {
               val groupIds = group.items.map { it.productoId }.toSet()
               val allGroupSelected = groupIds.isNotEmpty() && groupIds.all { it in selectedPosIds }
-              val groupAccent = if (group.isAssigned) providerAvatarColor(group.providerName) else MaterialTheme.colorScheme.onSurfaceVariant
+              val groupAccent = providerAvatarColor(group.providerName)
               Surface(
-                color = if (group.isAssigned) {
-                  groupAccent.copy(alpha = 0.11f)
-                } else {
-                  MaterialTheme.colorScheme.surfaceVariant
-                },
-                border = BorderStroke(1.dp, if (group.isAssigned) groupAccent.copy(alpha = 0.28f) else MaterialTheme.colorScheme.outlineVariant),
+                color = groupAccent.copy(alpha = 0.11f),
+                border = BorderStroke(1.dp, groupAccent.copy(alpha = 0.28f)),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
@@ -580,35 +504,26 @@ fun IsaacPosSyncScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                   ) {
-                    if (group.isAssigned) {
-                      Surface(
-                        color = groupAccent.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.size(30.dp),
-                      ) {
-                        Box(contentAlignment = Alignment.Center) {
-                          Text(
-                            text = providerInitials(group.providerName),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = groupAccent,
-                          )
-                        }
+                    Surface(
+                      color = groupAccent.copy(alpha = 0.2f),
+                      shape = RoundedCornerShape(8.dp),
+                      modifier = Modifier.size(30.dp),
+                    ) {
+                      Box(contentAlignment = Alignment.Center) {
+                        Text(
+                          text = providerInitials(group.providerName),
+                          style = MaterialTheme.typography.labelSmall,
+                          fontWeight = FontWeight.Bold,
+                          color = groupAccent,
+                        )
                       }
-                    } else {
-                      Icon(
-                        Icons.Rounded.Storefront,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                      )
                     }
                     Column {
                       Text(
                         text = group.providerName,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = if (group.isAssigned) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                       )
@@ -686,7 +601,6 @@ fun IsaacPosSyncScreen(
                         add(item.unidadPedido)
                       }
                       item.costoUnitario?.let { add("Costo: ${PriceParser.formatCurrency(it)}") }
-                      item.precioVenta?.let { add("PVP: ${PriceParser.formatCurrency(it)}") }
                     }.joinToString(" · ")
                     if (purchaseMeta.isNotBlank()) {
                       Text(
@@ -695,13 +609,9 @@ fun IsaacPosSyncScreen(
                         color = MaterialTheme.colorScheme.primary,
                       )
                     }
-                    val meta = buildList {
-                      if (item.categoria.isNotBlank()) add(item.categoria)
-                      if (item.codigoBarra.isNotBlank()) add("Cód: ${item.codigoBarra}")
-                    }.joinToString(" · ")
-                    if (meta.isNotBlank()) {
+                    if (item.codigoBarra.isNotBlank()) {
                       Text(
-                        text = meta,
+                        text = "Cód: ${item.codigoBarra}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                       )

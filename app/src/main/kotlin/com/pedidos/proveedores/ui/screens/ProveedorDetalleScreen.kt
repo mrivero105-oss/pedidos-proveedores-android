@@ -310,7 +310,7 @@ fun ProveedorDetalleScreen(
           OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Buscar por nombre, código o rubro...") },
+            placeholder = { Text("Buscar por nombre o código...") },
             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
             singleLine = true,
             shape = RoundedCornerShape(14.dp),

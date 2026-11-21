@@ -298,14 +298,15 @@ class AppViewModel(
         if (!silent) {
           _isaacPosState.value = IsaacPosSyncUiState.Syncing(
             fetched.productos.size,
-            "Cruzando ${fetched.productos.size} productos con tus proveedores...",
+            "Sincronizando ${fetched.proveedores.size} proveedor(es) y ${fetched.productos.size} productos...",
           )
         }
-        val summary = repository.syncIsaacPosProducts(fetched.productos)
+        val summary = repository.syncIsaacPosProducts(fetched.productos, fetched.proveedores)
         isaacPosSettingsStore.markSyncedNow()
         _isaacPosState.value = IsaacPosSyncUiState.LastResult(summary, fetched.sourceLabel)
         if (!silent) {
-          showMessage("Isaac POS sincronizado: ${summary.totalDescargados} productos (${summary.productosActualizadosLocales} vinculados)")
+          val provCount = fetched.proveedores.size
+          showMessage("Proveedores sincronizados: $provCount proveedor(es) · ${summary.totalDescargados} productos")
         }
       } catch (e: Exception) {
         if (!silent) {
