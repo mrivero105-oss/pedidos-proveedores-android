@@ -12,12 +12,20 @@ import com.pedidos.proveedores.data.local.IsaacPosSettingsStore
 import com.pedidos.proveedores.data.local.OtaSettings
 import com.pedidos.proveedores.data.local.OtaSettingsStore
 import com.pedidos.proveedores.data.local.PedidosRepository
+import com.pedidos.proveedores.data.local.PricingSettings
+import com.pedidos.proveedores.data.local.PricingSettingsStore
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosClient
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosSyncSummary
+import com.pedidos.proveedores.domain.pricing.BcvRateClient
+import com.pedidos.proveedores.domain.pricing.OptimalOrderPlan
+import com.pedidos.proveedores.domain.pricing.PricingIntelligenceEngine
 import com.pedidos.proveedores.domain.reconcile.CatalogReconciliationLink
 import com.pedidos.proveedores.domain.model.CatalogoArchivo
 import com.pedidos.proveedores.domain.model.CatalogoFormato
+import com.pedidos.proveedores.domain.model.HistorialPrecio
 import com.pedidos.proveedores.domain.model.IsaacPosProducto
+import com.pedidos.proveedores.domain.model.ModoIvaCatalogo
+import com.pedidos.proveedores.domain.model.MonedaCatalogo
 import com.pedidos.proveedores.domain.model.Pedido
 import com.pedidos.proveedores.domain.model.PedidoEstado
 import com.pedidos.proveedores.domain.model.PedidoItem
@@ -51,6 +59,10 @@ sealed interface CatalogImportUiState {
     val proveedorId: Long,
     val resultado: ResultadoImportacion,
     val reemplazarExistentes: Boolean = false,
+    val moneda: MonedaCatalogo = MonedaCatalogo.USD,
+    val tasaFijaBs: Double? = null,
+    val modoIva: ModoIvaCatalogo = ModoIvaCatalogo.INCLUIDO,
+    val porcentajeIva: Double = 16.0,
     val guardando: Boolean = false,
   ) : CatalogImportUiState
   data class Error(val proveedorId: Long, val mensaje: String) : CatalogImportUiState
@@ -103,6 +115,8 @@ class AppViewModel(
   private val otaUpdater: OtaUpdater,
   private val isaacPosSettingsStore: IsaacPosSettingsStore,
   private val isaacPosClient: IsaacPosClient,
+  private val pricingSettingsStore: PricingSettingsStore,
+  private val bcvRateClient: BcvRateClient,
 ) : ViewModel() {
 
   val proveedoresResumen: StateFlow<List<ProveedorResumen>> = repository.proveedoresResumen
@@ -110,9 +124,14 @@ class AppViewModel(
   val catalogos: StateFlow<List<CatalogoArchivo>> = repository.catalogos
   val pedidos: StateFlow<List<Pedido>> = repository.pedidos
   val isaacPosProductos: StateFlow<List<IsaacPosProducto>> = repository.isaacPosProductos
+  val historialPrecios: StateFlow<List<HistorialPrecio>> = repository.historialPrecios
   val aiSettings: StateFlow<AiSettings> = aiSettingsStore.settings
   val otaSettings: StateFlow<OtaSettings> = otaSettingsStore.settings
   val isaacPosSettings: StateFlow<IsaacPosSettings> = isaacPosSettingsStore.settings
+  val pricingSettings: StateFlow<PricingSettings> = pricingSettingsStore.settings
+
+  private val _bcvRefreshing = MutableStateFlow(false)
+  val bcvRefreshing: StateFlow<Boolean> = _bcvRefreshing.asStateFlow()
 
   private val _importState = MutableStateFlow<CatalogImportUiState>(CatalogImportUiState.Idle)
   val importState: StateFlow<CatalogImportUiState> = _importState.asStateFlow()
@@ -146,6 +165,13 @@ class AppViewModel(
     }
     if (otaSettingsStore.settings.value.autoCheckOnLaunch) {
       checkForOtaUpdate(silent = true)
+    }
+    val pCfg = pricingSettingsStore.settings.value
+    val bcvElapsed = pCfg.tasaUpdatedAtMillis?.let { System.currentTimeMillis() - it } ?: Long.MAX_VALUE
+    val shouldAutoFetchBcv = !pCfg.hasValidExchangeRate ||
+      (pCfg.tasaSourceLabel.startsWith("BCV", ignoreCase = true) && bcvElapsed >= BCV_AUTO_REFRESH_MS)
+    if (shouldAutoFetchBcv) {
+      fetchOfficialBcvRate(silent = true)
     }
   }
 
@@ -388,8 +414,109 @@ class AppViewModel(
       } else {
         producto
       }
-      repository.saveProducto(finalProducto)
+      repository.saveProducto(finalProducto, pricingSettingsStore.settings.value)
       showMessage(if (producto.id == 0L) "Producto agregado" else "Producto actualizado")
+    }
+  }
+
+  // --- Inteligencia de Compras y Márgenes ---
+
+  fun fetchOfficialBcvRate(silent: Boolean = false) {
+    if (_bcvRefreshing.value) return
+    _bcvRefreshing.value = true
+    viewModelScope.launch {
+      try {
+        val result = bcvRateClient.fetchOfficialRate()
+        result.onSuccess { quote ->
+          val label = if (quote.dateLabel.isNotBlank()) "${quote.sourceLabel} (${quote.dateLabel})" else quote.sourceLabel
+          pricingSettingsStore.updateExchangeRate(quote.rateBsPerUsd, label)
+          if (!silent) {
+            showMessage("Tasa BCV actualizada: Bs. ${"%.2f".format(quote.rateBsPerUsd)} / USD")
+          }
+        }.onFailure { err ->
+          if (!silent) {
+            showMessage(err.localizedMessage ?: "No se pudo consultar la tasa BCV; puedes ingresarla manualmente")
+          }
+        }
+      } finally {
+        _bcvRefreshing.value = false
+      }
+    }
+  }
+
+  fun savePricingSettings(
+    tasaBsPorUsd: Double,
+    tasaSourceLabel: String,
+    targetMarkupPercent: Double,
+    criticalMarkupPercent: Double,
+    defaultIvaPercent: Double = 16.0,
+    minOptimalSavingsPercent: Double = 3.0,
+  ) {
+    pricingSettingsStore.saveSettings(
+      tasaBsPorUsd = tasaBsPorUsd,
+      tasaSourceLabel = tasaSourceLabel,
+      targetMarkupPercent = targetMarkupPercent,
+      criticalMarkupPercent = criticalMarkupPercent,
+      defaultIvaPercent = defaultIvaPercent,
+      minOptimalSavingsPercent = minOptimalSavingsPercent,
+    )
+    showMessage("Configuración de precios y márgenes guardada")
+  }
+
+  fun updateMinOptimalSavingsPercent(percent: Double) {
+    pricingSettingsStore.updateMinOptimalSavingsPercent(percent)
+  }
+
+  fun updateCatalogPricingConfig(
+    catalogoId: Long,
+    moneda: MonedaCatalogo,
+    tasaFijaBs: Double?,
+    modoIva: ModoIvaCatalogo,
+    porcentajeIva: Double = 16.0,
+  ) {
+    viewModelScope.launch {
+      repository.updateCatalogPricingConfig(
+        catalogoId = catalogoId,
+        moneda = moneda,
+        tasaFijaBs = tasaFijaBs,
+        modoIva = modoIva,
+        porcentajeIva = porcentajeIva,
+      )
+      showMessage("Moneda e IVA del catálogo actualizados")
+    }
+  }
+
+  fun updateProductoPricingOverrides(
+    productoId: Long,
+    unidadesPorEmpaque: Double?,
+    esGravado: Boolean?,
+  ) {
+    viewModelScope.launch {
+      repository.updateProductoPricingOverrides(
+        productoId = productoId,
+        unidadesPorEmpaque = unidadesPorEmpaque,
+        esGravado = esGravado,
+      )
+      showMessage("Empaque e IVA del producto actualizados")
+    }
+  }
+
+  fun createDraftOrdersFromOptimalPlan(
+    plan: OptimalOrderPlan,
+    onCreated: (Int) -> Unit,
+  ) {
+    val drafts = PricingIntelligenceEngine.buildDraftPedidosFromPlan(plan)
+    if (drafts.isEmpty()) {
+      showMessage("No hay productos seleccionados para generar borradores")
+      return
+    }
+    viewModelScope.launch {
+      val ids = repository.saveMultiplePedidos(drafts)
+      showMessage(
+        if (ids.size == 1) "1 borrador de pedido creado en Pedidos"
+        else "${ids.size} borradores de pedido creados en Pedidos"
+      )
+      onCreated(ids.size)
     }
   }
 
@@ -492,6 +619,10 @@ class AppViewModel(
     val displayName = current.resultado.nombreArchivo
     val proveedorId = current.proveedorId
     val replaceFlag = current.reemplazarExistentes
+    val prevMoneda = current.moneda
+    val prevTasaFija = current.tasaFijaBs
+    val prevModoIva = current.modoIva
+    val prevPorcentajeIva = current.porcentajeIva
 
     _importState.value = CatalogImportUiState.Loading(
       proveedorId = proveedorId,
@@ -544,6 +675,10 @@ class AppViewModel(
           proveedorId = proveedorId,
           resultado = aiResult,
           reemplazarExistentes = replaceFlag,
+          moneda = prevMoneda,
+          tasaFijaBs = prevTasaFija,
+          modoIva = prevModoIva,
+          porcentajeIva = prevPorcentajeIva,
         )
       } catch (e: Exception) {
         _importState.value = current.copy(
@@ -590,6 +725,23 @@ class AppViewModel(
     }
   }
 
+  fun setImportPricingConfig(
+    moneda: MonedaCatalogo,
+    tasaFijaBs: Double?,
+    modoIva: ModoIvaCatalogo,
+    porcentajeIva: Double = 16.0,
+  ) {
+    _importState.update { state ->
+      if (state !is CatalogImportUiState.Ready) return@update state
+      state.copy(
+        moneda = moneda,
+        tasaFijaBs = tasaFijaBs,
+        modoIva = modoIva,
+        porcentajeIva = porcentajeIva,
+      )
+    }
+  }
+
   fun confirmCatalogImport(onDone: () -> Unit) {
     val current = _importState.value as? CatalogImportUiState.Ready ?: return
     if (current.guardando) return
@@ -605,6 +757,11 @@ class AppViewModel(
           rutaLocal = current.resultado.rutaLocal,
           productosImportados = current.resultado.productos,
           reemplazarExistentes = current.reemplazarExistentes,
+          moneda = current.moneda,
+          tasaFijaBs = current.tasaFijaBs,
+          modoIva = current.modoIva,
+          porcentajeIva = current.porcentajeIva,
+          pricingSettings = pricingSettingsStore.settings.value,
         )
         _importState.value = CatalogImportUiState.Idle
         showMessage(
@@ -692,7 +849,7 @@ class AppViewModel(
 
     if (savePriceToCatalog && unitPrice != null) {
       viewModelScope.launch {
-        repository.saveProducto(producto.copy(precio = unitPrice))
+        repository.saveProducto(producto.copy(precio = unitPrice), pricingSettingsStore.settings.value)
       }
     }
   }
@@ -867,6 +1024,7 @@ class AppViewModel(
 
   companion object {
     private const val AUTO_SYNC_INTERVAL_MS = 15L * 60L * 1000L
+    private const val BCV_AUTO_REFRESH_MS = 12L * 60L * 60L * 1000L
 
     fun factory(
       repository: PedidosRepository,
@@ -877,6 +1035,8 @@ class AppViewModel(
       otaUpdater: OtaUpdater,
       isaacPosSettingsStore: IsaacPosSettingsStore,
       isaacPosClient: IsaacPosClient,
+      pricingSettingsStore: PricingSettingsStore,
+      bcvRateClient: BcvRateClient,
     ): ViewModelProvider.Factory =
       object : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -890,6 +1050,8 @@ class AppViewModel(
             otaUpdater = otaUpdater,
             isaacPosSettingsStore = isaacPosSettingsStore,
             isaacPosClient = isaacPosClient,
+            pricingSettingsStore = pricingSettingsStore,
+            bcvRateClient = bcvRateClient,
           ) as T
         }
       }

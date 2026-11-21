@@ -7,6 +7,27 @@ enum class CatalogoFormato(val etiqueta: String, val extension: String) {
   IMAGEN("Imágenes", "jpg"),
 }
 
+enum class MonedaCatalogo(val codigo: String, val etiqueta: String, val simbolo: String) {
+  USD("USD", "USD ($)", "$"),
+  VES("VES", "Bolívares (Bs.)", "Bs.");
+
+  companion object {
+    fun fromDb(value: String?): MonedaCatalogo =
+      entries.firstOrNull { it.name.equals(value, ignoreCase = true) || it.codigo.equals(value, ignoreCase = true) } ?: USD
+  }
+}
+
+enum class ModoIvaCatalogo(val etiqueta: String, val etiquetaCorta: String, val descripcion: String) {
+  INCLUIDO("IVA incluido", "IVA inc.", "Los precios del catálogo ya son finales"),
+  SOLO_GRAVADOS("+IVA solo gravados (G)", "+IVA (G)", "Suma IVA solo a productos gravados (G) y deja exentos en 0%"),
+  TODO_CATALOGO("+IVA a todo el catálogo", "+IVA todo", "Suma IVA a todos los productos de este catálogo");
+
+  companion object {
+    fun fromDb(value: String?): ModoIvaCatalogo =
+      entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: INCLUIDO
+  }
+}
+
 enum class PedidoEstado(val etiqueta: String) {
   BORRADOR("Borrador"),
   ENVIADO("Enviado"),
@@ -42,6 +63,10 @@ data class CatalogoArchivo(
   val rutaLocal: String,
   val productosImportados: Int,
   val importadoEn: Long = System.currentTimeMillis(),
+  val moneda: MonedaCatalogo = MonedaCatalogo.USD,
+  val tasaFijaBs: Double? = null,
+  val modoIva: ModoIvaCatalogo = ModoIvaCatalogo.INCLUIDO,
+  val porcentajeIva: Double = 16.0,
 )
 
 data class Producto(
@@ -58,6 +83,23 @@ data class Producto(
   val stockPos: Double? = null,
   val precioVentaPos: Double? = null,
   val isaacPosId: String? = null,
+  val unidadesPorEmpaque: Double? = null,
+  val esGravado: Boolean? = null,
+)
+
+data class HistorialPrecio(
+  val id: Long = 0L,
+  val proveedorId: Long,
+  val productoId: Long? = null,
+  val isaacPosId: String? = null,
+  val catalogoId: Long? = null,
+  val nombreProducto: String,
+  val unidad: String = "u",
+  val precioOriginal: Double,
+  val moneda: MonedaCatalogo = MonedaCatalogo.USD,
+  val tasaUsadaBs: Double? = null,
+  val costoUnitarioUsd: Double,
+  val registradoEn: Long = System.currentTimeMillis(),
 )
 
 data class IsaacPosProducto(

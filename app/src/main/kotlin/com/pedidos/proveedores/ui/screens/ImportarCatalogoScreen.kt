@@ -3,6 +3,8 @@ package com.pedidos.proveedores.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -30,11 +33,14 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -49,24 +55,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pedidos.proveedores.domain.model.CatalogoFormato
+import com.pedidos.proveedores.domain.model.ModoIvaCatalogo
+import com.pedidos.proveedores.domain.model.MonedaCatalogo
 import com.pedidos.proveedores.domain.model.ProductoImportado
 import com.pedidos.proveedores.domain.parser.PriceParser
 import com.pedidos.proveedores.ui.CatalogImportUiState
 import com.pedidos.proveedores.ui.components.ProductThumbnail
 import com.pedidos.proveedores.ui.components.ProductoFormDialog
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ImportarCatalogoScreen(
   state: CatalogImportUiState,
   aiConfigured: Boolean,
+  globalRateBs: Double = 0.0,
   onToggleItem: (Int) -> Unit,
   onSelectAll: (Boolean) -> Unit,
   onUpdateItem: (ProductoImportado) -> Unit,
   onSetReplaceExisting: (Boolean) -> Unit,
+  onSetPricingConfig: (MonedaCatalogo, Double?, ModoIvaCatalogo, Double) -> Unit = { _, _, _, _ -> },
   onOpenPdfPreview: (rutaLocal: String, titulo: String) -> Unit,
   onOpenImagesPreview: (rutas: List<String>, titulo: String) -> Unit,
   onExtractWithAi: () -> Unit,
@@ -282,6 +294,82 @@ fun ImportarCatalogoScreen(
                       onCheckedChange = onSetReplaceExisting,
                     )
                   }
+
+                  HorizontalDivider()
+
+                  // Moneda e IVA del catálogo
+                  var tasaFijaText by remember(state.resultado.rutaLocal, state.moneda) {
+                    mutableStateOf(state.tasaFijaBs?.let { "%.2f".format(Locale.US, it) }.orEmpty())
+                  }
+                  Text(
+                    text = "Moneda e IVA de esta lista",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                  )
+                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MonedaCatalogo.entries.forEach { monedaOpt ->
+                      FilterChip(
+                        selected = state.moneda == monedaOpt,
+                        onClick = {
+                          onSetPricingConfig(
+                            monedaOpt,
+                            if (monedaOpt == MonedaCatalogo.VES) PriceParser.parse(tasaFijaText)?.takeIf { it > 0.0 } else null,
+                            state.modoIva,
+                            state.porcentajeIva,
+                          )
+                        },
+                        label = { Text(monedaOpt.etiqueta) },
+                      )
+                    }
+                  }
+                  if (state.moneda == MonedaCatalogo.VES) {
+                    OutlinedTextField(
+                      value = tasaFijaText,
+                      onValueChange = { txt ->
+                        tasaFijaText = txt
+                        onSetPricingConfig(
+                          MonedaCatalogo.VES,
+                          PriceParser.parse(txt)?.takeIf { it > 0.0 },
+                          state.modoIva,
+                          state.porcentajeIva,
+                        )
+                      },
+                      label = { Text("Tasa fija Bs/USD (opcional)") },
+                      placeholder = {
+                        Text(
+                          if (globalRateBs > 0.0) "Vacío = tasa actual (${"%.2f".format(Locale.US, globalRateBs)})"
+                          else "Vacío = usar tasa BCV global"
+                        )
+                      },
+                      singleLine = true,
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                      modifier = Modifier.fillMaxWidth(),
+                    )
+                  }
+                  FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                  ) {
+                    ModoIvaCatalogo.entries.forEach { modo ->
+                      FilterChip(
+                        selected = state.modoIva == modo,
+                        onClick = {
+                          onSetPricingConfig(
+                            state.moneda,
+                            state.tasaFijaBs,
+                            modo,
+                            state.porcentajeIva,
+                          )
+                        },
+                        label = { Text(modo.etiquetaCorta) },
+                      )
+                    }
+                  }
+                  Text(
+                    text = state.modoIva.descripcion,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  )
                 }
               }
             }

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.PictureAsPdf
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.ShoppingCartCheckout
 import androidx.compose.material.icons.rounded.TableChart
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -60,9 +61,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pedidos.proveedores.domain.model.CatalogoArchivo
 import com.pedidos.proveedores.domain.model.CatalogoFormato
+import com.pedidos.proveedores.domain.model.ModoIvaCatalogo
+import com.pedidos.proveedores.domain.model.MonedaCatalogo
 import com.pedidos.proveedores.domain.model.Producto
 import com.pedidos.proveedores.domain.model.Proveedor
 import com.pedidos.proveedores.domain.parser.PriceParser
+import com.pedidos.proveedores.ui.components.CatalogoPricingDialog
 import com.pedidos.proveedores.ui.components.ProductThumbnail
 import com.pedidos.proveedores.ui.components.ProductoFormDialog
 import com.pedidos.proveedores.ui.components.ProveedorFormDialog
@@ -88,6 +92,8 @@ fun ProveedorDetalleScreen(
   onOpenPdf: (rutaLocal: String, titulo: String) -> Unit,
   onOpenImages: (rutas: List<String>, titulo: String) -> Unit,
   onDeleteCatalogo: (catalogoId: Long, eliminarProductos: Boolean) -> Unit,
+  onUpdateCatalogoPricing: (Long, MonedaCatalogo, Double?, ModoIvaCatalogo, Double) -> Unit = { _, _, _, _, _ -> },
+  globalRateBs: Double = 0.0,
   onSaveProducto: (Producto, Uri?) -> Unit,
   onDeleteProducto: (Long) -> Unit,
   onStartOrder: () -> Unit,
@@ -106,6 +112,7 @@ fun ProveedorDetalleScreen(
   var showAddProducto by remember { mutableStateOf(false) }
   var editingProducto by remember { mutableStateOf<Producto?>(null) }
   var deletingCatalogo by remember { mutableStateOf<CatalogoArchivo?>(null) }
+  var pricingCatalogo by remember { mutableStateOf<CatalogoArchivo?>(null) }
 
   val filePickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.OpenDocument()
@@ -273,6 +280,7 @@ fun ProveedorDetalleScreen(
               else -> null
             },
             viewLabel = if (cat.formato == CatalogoFormato.IMAGEN) "Ver foto" else "Ver PDF",
+            onEditPricing = { pricingCatalogo = cat },
             onDelete = { deletingCatalogo = cat },
           )
         }
@@ -429,6 +437,17 @@ fun ProveedorDetalleScreen(
     )
   }
 
+  pricingCatalogo?.let { cat ->
+    CatalogoPricingDialog(
+      catalogo = cat,
+      globalRateBs = globalRateBs,
+      onSave = { moneda, tasaFija, modoIva, ivaPct ->
+        onUpdateCatalogoPricing(cat.id, moneda, tasaFija, modoIva, ivaPct)
+      },
+      onDismiss = { pricingCatalogo = null },
+    )
+  }
+
   deletingCatalogo?.let { cat ->
     AlertDialog(
       onDismissRequest = { deletingCatalogo = null },
@@ -468,6 +487,7 @@ private fun CatalogoArchivoCard(
   catalogo: CatalogoArchivo,
   onView: (() -> Unit)?,
   viewLabel: String,
+  onEditPricing: () -> Unit,
   onDelete: () -> Unit,
 ) {
   val dateStr = remember(catalogo.importadoEn) {
@@ -519,11 +539,33 @@ private fun CatalogoArchivoCard(
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        val pricingMeta = buildString {
+          append(catalogo.moneda.simbolo)
+          if (catalogo.moneda == MonedaCatalogo.VES && catalogo.tasaFijaBs != null) {
+            append(" (fija ${PriceParser.formatQuantity(catalogo.tasaFijaBs)})")
+          }
+          append(" · ${catalogo.modoIva.etiquetaCorta}")
+        }
+        Text(
+          text = pricingMeta,
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.primary,
+        )
       }
       if (onView != null) {
-        TextButton(onClick = onView) {
+        TextButton(
+          onClick = onView,
+          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+        ) {
           Text(viewLabel)
         }
+      }
+      IconButton(onClick = onEditPricing) {
+        Icon(
+          Icons.Rounded.Tune,
+          contentDescription = "Configurar moneda e IVA",
+          tint = MaterialTheme.colorScheme.primary,
+        )
       }
       IconButton(onClick = onDelete) {
         Icon(

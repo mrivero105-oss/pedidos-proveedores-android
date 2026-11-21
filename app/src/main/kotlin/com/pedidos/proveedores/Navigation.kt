@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.ShoppingCartCheckout
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material3.Badge
@@ -37,6 +38,8 @@ import androidx.navigation3.ui.NavDisplay
 import com.pedidos.proveedores.data.local.AppThemeMode
 import com.pedidos.proveedores.domain.model.Pedido
 import com.pedidos.proveedores.domain.model.PedidoEstado
+import com.pedidos.proveedores.domain.pricing.PricingIntelligenceEngine
+import com.pedidos.proveedores.domain.pricing.PvpAdjustmentExporter
 import com.pedidos.proveedores.domain.whatsapp.WhatsAppOrderFormatter
 import com.pedidos.proveedores.domain.whatsapp.WhatsAppSender
 import com.pedidos.proveedores.ui.AppViewModel
@@ -50,14 +53,16 @@ import com.pedidos.proveedores.ui.screens.ImportarCatalogoScreen
 import com.pedidos.proveedores.ui.screens.IsaacPosSyncScreen
 import com.pedidos.proveedores.ui.screens.NuevoPedidoScreen
 import com.pedidos.proveedores.ui.screens.PedidoDetalleScreen
+import com.pedidos.proveedores.ui.screens.PreciosInteligenciaScreen
 import com.pedidos.proveedores.ui.screens.ProveedorDetalleScreen
 import com.pedidos.proveedores.ui.screens.ProveedoresScreen
 import com.pedidos.proveedores.ui.screens.VisorImagenScreen
 import com.pedidos.proveedores.ui.screens.VisorPdfScreen
 
 private const val TAB_PROVEEDORES = 0
-private const val TAB_NUEVO_PEDIDO = 1
-private const val TAB_HISTORIAL = 2
+private const val TAB_PRECIOS = 1
+private const val TAB_NUEVO_PEDIDO = 2
+private const val TAB_HISTORIAL = 3
 
 @Composable
 fun MainNavigation(
@@ -84,6 +89,27 @@ fun MainNavigation(
   val isaacPosSettings by viewModel.isaacPosSettings.collectAsState()
   val isaacPosState by viewModel.isaacPosState.collectAsState()
   val isaacPosProductos by viewModel.isaacPosProductos.collectAsState()
+  val historialPrecios by viewModel.historialPrecios.collectAsState()
+  val pricingSettings by viewModel.pricingSettings.collectAsState()
+  val bcvRefreshing by viewModel.bcvRefreshing.collectAsState()
+
+  val pricingSummary = remember(
+    proveedores,
+    productos,
+    catalogos,
+    isaacPosProductos,
+    historialPrecios,
+    pricingSettings,
+  ) {
+    PricingIntelligenceEngine.analyze(
+      proveedores = proveedores.map { it.proveedor },
+      productos = productos,
+      catalogos = catalogos,
+      posProducts = isaacPosProductos,
+      historialPrecios = historialPrecios,
+      settings = pricingSettings,
+    )
+  }
 
   val snackbarHostState = remember { SnackbarHostState() }
   var whatsAppDialogPedido by remember { mutableStateOf<Pair<Pedido, Boolean>?>(null) }
@@ -129,6 +155,25 @@ fun MainNavigation(
                       onClick = { selectedTab = TAB_PROVEEDORES },
                       icon = { Icon(Icons.Rounded.Storefront, contentDescription = null) },
                       label = { Text("Inicio") },
+                    )
+                    NavigationBarItem(
+                      selected = selectedTab == TAB_PRECIOS,
+                      onClick = { selectedTab = TAB_PRECIOS },
+                      icon = {
+                        BadgedBox(
+                          badge = {
+                            if (pricingSummary.criticalOrLossCount > 0) {
+                              Badge {
+                                val count = pricingSummary.criticalOrLossCount
+                                Text(if (count > 99) "99+" else count.toString())
+                              }
+                            }
+                          }
+                        ) {
+                          Icon(Icons.AutoMirrored.Rounded.TrendingUp, contentDescription = null)
+                        }
+                      },
+                      label = { Text("Precios") },
                     )
                     NavigationBarItem(
                       selected = selectedTab == TAB_NUEVO_PEDIDO,
@@ -182,6 +227,48 @@ fun MainNavigation(
                   onStartOrder = { id ->
                     viewModel.startOrderForProveedor(id)
                     selectedTab = TAB_NUEVO_PEDIDO
+                  },
+                  modifier = Modifier.padding(homePadding),
+                )
+
+                TAB_PRECIOS -> PreciosInteligenciaScreen(
+                  summary = pricingSummary,
+                  pricingSettings = pricingSettings,
+                  lowStockThreshold = isaacPosSettings.lowStockThreshold,
+                  bcvRefreshing = bcvRefreshing,
+                  onFetchBcvRate = { viewModel.fetchOfficialBcvRate(silent = false) },
+                  onSavePricingSettings = { rate, src, target, crit, iva, minSave ->
+                    viewModel.savePricingSettings(rate, src, target, crit, iva, minSave)
+                  },
+                  onUpdateMinSavingsPercent = { viewModel.updateMinOptimalSavingsPercent(it) },
+                  onUpdateProductPackTax = { prodId, units, gravado ->
+                    viewModel.updateProductoPricingOverrides(prodId, units, gravado)
+                  },
+                  onCopyPvpList = { alerts ->
+                    val txt = PvpAdjustmentExporter.formatWhatsAppText(alerts, pricingSettings.targetMarkupPercent)
+                    WhatsAppSender.copyToClipboard(context, txt)
+                    viewModel.showMessage("Lista de ${alerts.size} PVP sugeridos copiada")
+                  },
+                  onSharePvpWhatsApp = { alerts ->
+                    val txt = PvpAdjustmentExporter.formatWhatsAppText(alerts, pricingSettings.targetMarkupPercent)
+                    val sent = WhatsAppSender.sendMessage(context, "", txt)
+                    if (!sent) {
+                      WhatsAppSender.copyToClipboard(context, txt)
+                      viewModel.showMessage("No se encontró WhatsApp; la lista se copió al portapapeles")
+                    }
+                  },
+                  onExportPvpCsv = { alerts ->
+                    val ok = PvpAdjustmentExporter.shareCsvFile(context, alerts, pricingSettings.targetMarkupPercent)
+                    if (!ok) {
+                      viewModel.showMessage("No se pudo exportar el archivo CSV")
+                    }
+                  },
+                  onCreateOptimalDrafts = { plan ->
+                    viewModel.createDraftOrdersFromOptimalPlan(plan) { created ->
+                      if (created > 0) {
+                        selectedTab = TAB_HISTORIAL
+                      }
+                    }
                   },
                   modifier = Modifier.padding(homePadding),
                 )
@@ -264,6 +351,10 @@ fun MainNavigation(
               onOpenPdf = { ruta, titulo -> backStack.add(VisorPdfRoute(ruta, titulo)) },
               onOpenImages = { rutas, titulo -> backStack.add(VisorImagenRoute(rutas, titulo)) },
               onDeleteCatalogo = { catId, delProds -> viewModel.deleteCatalogo(catId, delProds) },
+              onUpdateCatalogoPricing = { catId, moneda, tasaFija, modoIva, ivaPct ->
+                viewModel.updateCatalogPricingConfig(catId, moneda, tasaFija, modoIva, ivaPct)
+              },
+              globalRateBs = pricingSettings.tasaBsPorUsd,
               onSaveProducto = { prod, photoUri -> viewModel.saveProducto(prod, photoUri) },
               onDeleteProducto = { viewModel.deleteProducto(it) },
               onStartOrder = {
@@ -281,10 +372,14 @@ fun MainNavigation(
             ImportarCatalogoScreen(
               state = importState,
               aiConfigured = aiSettings.isConfigured,
+              globalRateBs = pricingSettings.tasaBsPorUsd,
               onToggleItem = { viewModel.toggleImportedItem(it) },
               onSelectAll = { viewModel.selectAllImported(it) },
               onUpdateItem = { viewModel.updateImportedItem(it) },
               onSetReplaceExisting = { viewModel.setReplaceExisting(it) },
+              onSetPricingConfig = { moneda, tasaFija, modoIva, ivaPct ->
+                viewModel.setImportPricingConfig(moneda, tasaFija, modoIva, ivaPct)
+              },
               onOpenPdfPreview = { ruta, titulo -> backStack.add(VisorPdfRoute(ruta, titulo)) },
               onOpenImagesPreview = { rutas, titulo -> backStack.add(VisorImagenRoute(rutas, titulo)) },
               onExtractWithAi = { viewModel.reExtractCurrentWithGemini() },

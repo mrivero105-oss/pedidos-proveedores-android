@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity() {
               otaUpdater = container.otaUpdater,
               isaacPosSettingsStore = container.isaacPosSettingsStore,
               isaacPosClient = container.isaacPosClient,
+              pricingSettingsStore = container.pricingSettingsStore,
+              bcvRateClient = container.bcvRateClient,
             )
           )
           MainNavigation(

@@ -40,6 +40,10 @@ class PedidosDbHelper(context: Context) : SQLiteOpenHelper(
         ruta_local TEXT NOT NULL,
         productos_importados INTEGER NOT NULL DEFAULT 0,
         importado_en INTEGER NOT NULL,
+        moneda TEXT NOT NULL DEFAULT 'USD',
+        tasa_fija_bs REAL,
+        modo_iva TEXT NOT NULL DEFAULT 'INCLUIDO',
+        porcentaje_iva REAL NOT NULL DEFAULT 16.0,
         FOREIGN KEY (proveedor_id) REFERENCES proveedores(id) ON DELETE CASCADE
       )
       """.trimIndent()
@@ -61,6 +65,8 @@ class PedidosDbHelper(context: Context) : SQLiteOpenHelper(
         stock_pos REAL,
         precio_venta_pos REAL,
         isaac_pos_id TEXT,
+        unidades_por_empaque REAL,
+        es_gravado INTEGER,
         FOREIGN KEY (proveedor_id) REFERENCES proveedores(id) ON DELETE CASCADE,
         FOREIGN KEY (catalogo_id) REFERENCES catalogos(id) ON DELETE SET NULL
       )
@@ -102,6 +108,7 @@ class PedidosDbHelper(context: Context) : SQLiteOpenHelper(
     )
 
     createIsaacPosCacheTable(db)
+    createPriceHistoryTable(db)
 
     db.execSQL("CREATE INDEX idx_catalogos_proveedor ON catalogos(proveedor_id)")
     db.execSQL("CREATE INDEX idx_productos_proveedor ON productos(proveedor_id)")
@@ -122,6 +129,43 @@ class PedidosDbHelper(context: Context) : SQLiteOpenHelper(
       db.execSQL("CREATE INDEX IF NOT EXISTS idx_productos_isaac_pos_id ON productos(isaac_pos_id)")
       createIsaacPosCacheTable(db)
     }
+    if (oldVersion < 4) {
+      db.execSQL("ALTER TABLE catalogos ADD COLUMN moneda TEXT NOT NULL DEFAULT 'USD'")
+      db.execSQL("ALTER TABLE catalogos ADD COLUMN tasa_fija_bs REAL")
+      db.execSQL("ALTER TABLE catalogos ADD COLUMN modo_iva TEXT NOT NULL DEFAULT 'INCLUIDO'")
+      db.execSQL("ALTER TABLE catalogos ADD COLUMN porcentaje_iva REAL NOT NULL DEFAULT 16.0")
+      db.execSQL("ALTER TABLE productos ADD COLUMN unidades_por_empaque REAL")
+      db.execSQL("ALTER TABLE productos ADD COLUMN es_gravado INTEGER")
+      createPriceHistoryTable(db)
+    }
+  }
+
+  private fun createPriceHistoryTable(db: SQLiteDatabase) {
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS historial_precios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        proveedor_id INTEGER NOT NULL,
+        producto_id INTEGER,
+        isaac_pos_id TEXT,
+        catalogo_id INTEGER,
+        nombre_producto TEXT NOT NULL,
+        unidad TEXT NOT NULL DEFAULT 'u',
+        precio_original REAL NOT NULL,
+        moneda TEXT NOT NULL DEFAULT 'USD',
+        tasa_usada_bs REAL,
+        costo_unitario_usd REAL NOT NULL,
+        registrado_en INTEGER NOT NULL,
+        FOREIGN KEY (proveedor_id) REFERENCES proveedores(id) ON DELETE CASCADE,
+        FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE SET NULL,
+        FOREIGN KEY (catalogo_id) REFERENCES catalogos(id) ON DELETE SET NULL
+      )
+      """.trimIndent()
+    )
+    db.execSQL("CREATE INDEX IF NOT EXISTS idx_hist_precios_prov ON historial_precios(proveedor_id)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS idx_hist_precios_pos ON historial_precios(isaac_pos_id)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS idx_hist_precios_prod ON historial_precios(producto_id)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS idx_hist_precios_fecha ON historial_precios(registrado_en DESC)")
   }
 
   private fun createIsaacPosCacheTable(db: SQLiteDatabase) {
@@ -150,6 +194,6 @@ class PedidosDbHelper(context: Context) : SQLiteOpenHelper(
 
   companion object {
     const val DATABASE_NAME = "pedidos_proveedores.db"
-    const val DATABASE_VERSION = 3
+    const val DATABASE_VERSION = 4
   }
 }
