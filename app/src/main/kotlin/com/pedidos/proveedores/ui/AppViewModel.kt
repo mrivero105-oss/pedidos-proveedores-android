@@ -14,6 +14,7 @@ import com.pedidos.proveedores.data.local.OtaSettingsStore
 import com.pedidos.proveedores.data.local.PedidosRepository
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosClient
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosSyncSummary
+import com.pedidos.proveedores.domain.reconcile.CatalogReconciliationLink
 import com.pedidos.proveedores.domain.model.CatalogoArchivo
 import com.pedidos.proveedores.domain.model.CatalogoFormato
 import com.pedidos.proveedores.domain.model.IsaacPosProducto
@@ -302,6 +303,24 @@ class AppViewModel(
       val provId = repository.saveProveedor(proveedor)
       val count = repository.assignIsaacPosProductsToProveedor(provId, items)
       showMessage("Proveedor \"${proveedor.nombre}\" creado con $count producto(s) de Isaac POS")
+    }
+  }
+
+  fun reconcileCatalogLinks(proveedorId: Long, links: List<CatalogReconciliationLink>) {
+    if (links.isEmpty()) return
+    viewModelScope.launch {
+      val count = repository.reconcileCatalogLinks(proveedorId, links)
+      showMessage(
+        if (count == 1) "1 producto conciliado con tu base de datos Isaac POS"
+        else "$count productos conciliados con tu base de datos Isaac POS"
+      )
+    }
+  }
+
+  fun unlinkCatalogProductFromPos(localProductId: Long) {
+    viewModelScope.launch {
+      repository.unlinkCatalogProductFromPos(localProductId)
+      showMessage("Vínculo con Isaac POS eliminado")
     }
   }
 

@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.CompareArrows
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.Delete
@@ -90,6 +91,7 @@ fun ProveedorDetalleScreen(
   onSaveProducto: (Producto, Uri?) -> Unit,
   onDeleteProducto: (Long) -> Unit,
   onStartOrder: () -> Unit,
+  onOpenConciliar: () -> Unit = {},
 ) {
   if (proveedor == null) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -223,6 +225,19 @@ fun ProveedorDetalleScreen(
                 Spacer(Modifier.width(6.dp))
                 Text("Imágenes")
               }
+            }
+            val unlinkedCount = productos.count { it.isaacPosId.isNullOrBlank() }
+            OutlinedButton(
+              onClick = onOpenConciliar,
+              shape = RoundedCornerShape(10.dp),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Icon(Icons.AutoMirrored.Rounded.CompareArrows, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(Modifier.width(6.dp))
+              Text(
+                if (unlinkedCount > 0) "Conciliar con mi POS ($unlinkedCount sin vincular)"
+                else "Conciliar catálogo con mi Isaac POS"
+              )
             }
             Button(
               onClick = onStartOrder,

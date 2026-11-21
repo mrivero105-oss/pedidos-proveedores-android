@@ -8,6 +8,7 @@ import androidx.core.database.getLongOrNull
 import androidx.core.database.getStringOrNull
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosSyncMatcher
 import com.pedidos.proveedores.domain.isaacpos.IsaacPosSyncSummary
+import com.pedidos.proveedores.domain.reconcile.CatalogReconciliationLink
 import com.pedidos.proveedores.domain.model.CatalogoArchivo
 import com.pedidos.proveedores.domain.model.CatalogoFormato
 import com.pedidos.proveedores.domain.model.IsaacPosProducto
@@ -55,6 +56,13 @@ interface PedidosRepository {
     proveedorId: Long,
     posProducts: List<IsaacPosProducto>,
   ): Int
+
+  suspend fun reconcileCatalogLinks(
+    proveedorId: Long,
+    links: List<CatalogReconciliationLink>,
+  ): Int
+
+  suspend fun unlinkCatalogProductFromPos(localProductId: Long)
 
   suspend fun savePedido(pedido: Pedido): Long
   suspend fun updatePedidoEstado(pedidoId: Long, estado: PedidoEstado)
@@ -378,6 +386,88 @@ class SqlitePedidosRepository(
 
     reloadSync()
     addedOrUpdated
+  }
+
+  override suspend fun reconcileCatalogLinks(
+    proveedorId: Long,
+    links: List<CatalogReconciliationLink>,
+  ): Int = withContext(Dispatchers.IO) {
+    if (links.isEmpty()) return@withContext 0
+    val db = dbHelper.writableDatabase
+    val existingById = loadProductos(db)
+      .filter { it.proveedorId == proveedorId }
+      .associateBy { it.id }
+      .toMutableMap()
+
+    var reconciledCount = 0
+    db.beginTransaction()
+    try {
+      for (link in links) {
+        val local = existingById[link.localProductId] ?: continue
+        val pos = link.posProduct
+
+        // Detectar duplicado previo con el mismo isaac_pos_id en este proveedor para fusionar sin perder historial
+        val duplicate = existingById.values.firstOrNull { other ->
+          other.id != local.id && other.isaacPosId == pos.productoId
+        }
+
+        val cv = ContentValues().apply {
+          put("isaac_pos_id", pos.productoId)
+          put("stock_pos", pos.stockActual)
+          if (pos.precioVenta != null) put("precio_venta_pos", pos.precioVenta)
+          if (local.codigo.isBlank() && pos.codigoBarra.isNotBlank()) {
+            put("codigo", pos.codigoBarra)
+          }
+          if (local.precio == null) {
+            val fallbackPrice = pos.costoUnitario ?: duplicate?.precio
+            if (fallbackPrice != null) put("precio", fallbackPrice)
+          }
+          val remoteUnit = pos.unidadPedido.trim()
+          if (local.unidad.trim().equals("u", ignoreCase = true) &&
+            remoteUnit.isNotBlank() &&
+            !remoteUnit.equals("u", ignoreCase = true)
+          ) {
+            put("unidad", remoteUnit)
+          }
+          val duplicateImage = duplicate?.imagenRuta
+          if (local.imagenRuta.isNullOrBlank() && !duplicateImage.isNullOrBlank()) {
+            put("imagen_ruta", duplicateImage)
+          }
+        }
+        db.update("productos", cv, "id = ?", arrayOf(local.id.toString()))
+
+        if (duplicate != null) {
+          val relinkCv = ContentValues().apply { put("producto_id", local.id) }
+          db.update("pedido_items", relinkCv, "producto_id = ?", arrayOf(duplicate.id.toString()))
+          db.delete("productos", "id = ?", arrayOf(duplicate.id.toString()))
+          existingById.remove(duplicate.id)
+        }
+
+        existingById[local.id] = local.copy(
+          isaacPosId = pos.productoId,
+          stockPos = pos.stockActual,
+          precioVentaPos = pos.precioVenta,
+        )
+        reconciledCount++
+      }
+      db.setTransactionSuccessful()
+    } finally {
+      db.endTransaction()
+    }
+
+    reloadSync()
+    reconciledCount
+  }
+
+  override suspend fun unlinkCatalogProductFromPos(localProductId: Long) = withContext(Dispatchers.IO) {
+    val db = dbHelper.writableDatabase
+    val cv = ContentValues().apply {
+      putNull("isaac_pos_id")
+      putNull("stock_pos")
+      putNull("precio_venta_pos")
+    }
+    db.update("productos", cv, "id = ?", arrayOf(localProductId.toString()))
+    reloadSync()
   }
 
   override suspend fun savePedido(pedido: Pedido): Long = withContext(Dispatchers.IO) {

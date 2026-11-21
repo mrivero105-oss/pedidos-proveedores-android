@@ -44,6 +44,7 @@ import com.pedidos.proveedores.ui.OtaUiState
 import com.pedidos.proveedores.ui.components.AiSettingsDialog
 import com.pedidos.proveedores.ui.components.OtaUpdateDialog
 import com.pedidos.proveedores.ui.components.WhatsAppPreviewDialog
+import com.pedidos.proveedores.ui.screens.ConciliarCatalogoScreen
 import com.pedidos.proveedores.ui.screens.HistorialPedidosScreen
 import com.pedidos.proveedores.ui.screens.ImportarCatalogoScreen
 import com.pedidos.proveedores.ui.screens.IsaacPosSyncScreen
@@ -272,10 +273,11 @@ fun MainNavigation(
                   backStack.removeLastOrNull()
                 }
               },
+              onOpenConciliar = { backStack.add(ConciliarCatalogoRoute(route.proveedorId)) },
             )
           }
 
-          entry<ImportarCatalogoRoute> {
+          entry<ImportarCatalogoRoute> { route ->
             ImportarCatalogoScreen(
               state = importState,
               aiConfigured = aiSettings.isConfigured,
@@ -293,11 +295,41 @@ fun MainNavigation(
               onConfirmImport = {
                 viewModel.confirmCatalogImport {
                   backStack.removeLastOrNull()
+                  if (isaacPosProductos.isNotEmpty()) {
+                    backStack.add(ConciliarCatalogoRoute(route.proveedorId))
+                  }
                 }
               },
               onCancel = {
                 viewModel.cancelCatalogImport()
                 backStack.removeLastOrNull()
+              },
+            )
+          }
+
+          entry<ConciliarCatalogoRoute> { route ->
+            val proveedor = proveedores.firstOrNull { it.proveedor.id == route.proveedorId }?.proveedor
+            val provCatalogs = catalogos.filter { it.proveedorId == route.proveedorId }
+            val provProducts = productos.filter { it.proveedorId == route.proveedorId }
+
+            ConciliarCatalogoScreen(
+              proveedor = proveedor,
+              catalogos = provCatalogs,
+              providerProducts = provProducts,
+              allPosProducts = isaacPosProductos,
+              lowStockThreshold = isaacPosSettings.lowStockThreshold,
+              onBack = { backStack.removeLastOrNull() },
+              onOpenIsaacPosSync = { backStack.add(IsaacPosSyncRoute) },
+              onApproveLinks = { links -> viewModel.reconcileCatalogLinks(route.proveedorId, links) },
+              onUnlinkProduct = { localId -> viewModel.unlinkCatalogProductFromPos(localId) },
+              onAddPosOnlyToProvider = { pos -> viewModel.assignIsaacPosProductsToProveedor(route.proveedorId, listOf(pos)) },
+              onStartOrderWithLowStock = {
+                viewModel.startOrderForProveedor(route.proveedorId)
+                viewModel.prefillLowStockForCurrentProveedor()
+                selectedTab = TAB_NUEVO_PEDIDO
+                while (backStack.size > 1) {
+                  backStack.removeLastOrNull()
+                }
               },
             )
           }
