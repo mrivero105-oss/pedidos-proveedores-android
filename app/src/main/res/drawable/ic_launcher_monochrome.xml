@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Contorno limpio de caja isométrica de suministro dentro de la zona segura 66dp -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M51,29 L70,39.5 L70,49.5 M51,29 L32,39.5 L32,62.5 L51,73 L53,71.9"
+        android:strokeWidth="4.2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Aristas frontales de la caja -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M32,39.5 L51,50 L70,39.5 M51,50 L51,73"
+        android:strokeWidth="3.4"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Cinta superior de sellado del paquete (conecta borde sup-der hacia frontal-izq y baja por la cara izq) -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M60.5,34.25 L41.5,44.75 L41.5,51.5"
+        android:strokeWidth="3.2"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Sello circular de pedido aprobado con check recortado (evenOdd para Material You) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M67,54 A12,12 0 1,0 67,78 A12,12 0 1,0 67,54 Z M61.4,66.2 L65.1,69.9 L73.1,61.7 L75.5,64.0 L65.1,74.6 L59.0,68.5 Z" />
+</vector>

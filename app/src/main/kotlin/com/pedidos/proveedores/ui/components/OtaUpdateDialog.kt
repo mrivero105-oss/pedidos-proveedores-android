@@ -233,7 +233,7 @@ fun OtaUpdateDialog(
             ) {
               Text(
                 text = if (otaState.waitingForPermission) {
-                  "Activa el permiso \"Instalar aplicaciones desconocidas\" para Pedidos Proveedores y toca el botón para finalizar la actualización."
+                  "Activa el permiso \"Instalar aplicaciones desconocidas\" para Isaac Orders y toca el botón para finalizar la actualización."
                 } else {
                   "APK ${otaState.release.tagName} descargado y verificado. Toca para instalar conservando tus datos."
                 },

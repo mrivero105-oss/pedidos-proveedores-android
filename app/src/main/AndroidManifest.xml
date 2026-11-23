@@ -49,7 +49,7 @@
             </intent-filter>
 
             <!-- Recibir archivos (PDF, Excel, CSV), fotos o mensajes de texto directo desde WhatsApp -->
-            <intent-filter android:label="Importar en Pedidos Proveedores">
+            <intent-filter android:label="Importar en Isaac Orders">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/pdf" />
@@ -63,7 +63,7 @@
             </intent-filter>
 
             <!-- Recibir varias fotos de catálogo juntas desde WhatsApp -->
-            <intent-filter android:label="Importar fotos en Pedidos Proveedores">
+            <intent-filter android:label="Importar fotos en Isaac Orders">
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />

@@ -140,14 +140,14 @@ fun ProveedoresScreen(
     ) {
       Column(modifier = Modifier.weight(1f)) {
         Text(
-          text = "Proveedores",
+          text = "Isaac Orders",
           style = MaterialTheme.typography.titleLarge,
           fontWeight = FontWeight.Bold,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
         Text(
-          text = if (proveedores.isEmpty()) "Catálogos y pedidos"
+          text = if (proveedores.isEmpty()) "Proveedores y pedidos"
           else "${proveedores.size} prov. · $totalProductosCatalogos prod.",
           style = MaterialTheme.typography.labelSmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
