@@ -48,12 +48,142 @@ class CatalogImporter(
       } ?: error("No se pudo abrir el archivo seleccionado.")
 
       when (formato) {
-        CatalogoFormato.PDF -> parsePdfOffline(proveedorId, targetFile, displayName)
+        CatalogoFormato.PDF -> {
+          val offline = parsePdfOffline(proveedorId, targetFile, displayName)
+          if (offline.productos.size < 2 && aiSettings.isConfigured) {
+            onProgress(0, 1, "PDF visual detectado; leyendo con IA Gemini...")
+            val aiAttempt = runCatching {
+              extractPdfWithGemini(
+                proveedorId = proveedorId,
+                pdfFile = targetFile,
+                displayName = displayName,
+                apiKey = aiSettings.geminiApiKey,
+                model = aiSettings.geminiModel,
+                onProgress = onProgress,
+              )
+            }
+            if (aiAttempt.isSuccess && aiAttempt.getOrThrow().productos.isNotEmpty()) {
+              aiAttempt.getOrThrow()
+            } else {
+              offline
+            }
+          } else {
+            offline
+          }
+        }
         CatalogoFormato.XLSX -> parseExcel(targetFile, displayName)
         CatalogoFormato.CSV -> parseCsv(targetFile, displayName)
+        CatalogoFormato.TEXTO -> {
+          val rawText = runCatching { targetFile.readText(Charsets.UTF_8) }.getOrDefault("")
+          parsePlainTextInternal(
+            targetFile = targetFile,
+            displayName = displayName,
+            rawText = rawText,
+            aiSettings = aiSettings,
+            onProgress = onProgress,
+          )
+        }
         CatalogoFormato.IMAGEN -> error("Formato imagen gestionado arriba")
       }
     }
+
+  suspend fun importFromPlainText(
+    proveedorId: Long,
+    rawText: String,
+    displayName: String = "",
+    aiSettings: AiSettings = AiSettings(),
+    onProgress: (current: Int, total: Int, statusText: String) -> Unit = { _, _, _ -> },
+  ): ResultadoImportacion = withContext(Dispatchers.IO) {
+    require(rawText.isNotBlank()) { "El mensaje de texto está vacío." }
+    val stamp = System.currentTimeMillis()
+    val finalTitle = displayName.trim().ifBlank {
+      val dateTag = java.text.SimpleDateFormat("dd-MM HH.mm", java.util.Locale.US).format(java.util.Date(stamp))
+      "Lista WhatsApp $dateTag.txt"
+    }
+    val dir = File(context.filesDir, "catalogos/prov_$proveedorId").apply { mkdirs() }
+    val safeName = sanitizeFileName(finalTitle).let { if (it.endsWith(".txt", true)) it else "$it.txt" }
+    val targetFile = File(dir, "${stamp}_$safeName")
+    targetFile.writeText(rawText.trim(), Charsets.UTF_8)
+
+    parsePlainTextInternal(
+      targetFile = targetFile,
+      displayName = finalTitle,
+      rawText = rawText,
+      aiSettings = aiSettings,
+      onProgress = onProgress,
+    )
+  }
+
+  suspend fun extractTextWithGemini(
+    rawText: String,
+    displayName: String,
+    savedFilePath: String,
+    apiKey: String,
+    model: String,
+    onProgress: (current: Int, total: Int, statusText: String) -> Unit = { _, _, _ -> },
+  ): ResultadoImportacion = withContext(Dispatchers.IO) {
+    val offlineHints = WhatsAppCatalogTextParser.parse(rawText)
+    val aiRes = geminiExtractor.extractFromPlainText(
+      rawText = rawText,
+      apiKey = apiKey,
+      model = model,
+      onProgress = onProgress,
+    )
+    ResultadoImportacion(
+      formato = CatalogoFormato.TEXTO,
+      nombreArchivo = displayName,
+      rutaLocal = savedFilePath,
+      productos = aiRes.productos,
+      advertencia = aiRes.advertencia,
+      metodoExtraccion = "IA Gemini ($model)",
+      monedaSugerida = offlineHints.monedaSugerida,
+      modoIvaSugerido = offlineHints.modoIvaSugerido,
+      textoOriginal = rawText,
+    )
+  }
+
+  private suspend fun parsePlainTextInternal(
+    targetFile: File,
+    displayName: String,
+    rawText: String,
+    aiSettings: AiSettings,
+    onProgress: (current: Int, total: Int, statusText: String) -> Unit,
+  ): ResultadoImportacion {
+    onProgress(1, 1, "Extrayendo precios de lista de texto...")
+    val offline = WhatsAppCatalogTextParser.parse(rawText)
+    if (offline.productos.isEmpty() && aiSettings.isConfigured) {
+      val aiAttempt = runCatching {
+        extractTextWithGemini(
+          rawText = rawText,
+          displayName = displayName,
+          savedFilePath = targetFile.absolutePath,
+          apiKey = aiSettings.geminiApiKey,
+          model = aiSettings.geminiModel,
+          onProgress = onProgress,
+        )
+      }
+      if (aiAttempt.isSuccess && aiAttempt.getOrThrow().productos.isNotEmpty()) {
+        return aiAttempt.getOrThrow()
+      }
+    }
+
+    val warning = when {
+      offline.productos.isEmpty() ->
+        "No se detectaron líneas con producto y precio en modo offline. Pulsa \"Mejorar con IA\" o revisa el formato del texto."
+      else -> null
+    }
+    return ResultadoImportacion(
+      formato = CatalogoFormato.TEXTO,
+      nombreArchivo = displayName,
+      rutaLocal = targetFile.absolutePath,
+      productos = offline.productos,
+      advertencia = warning,
+      metodoExtraccion = "Lista WhatsApp (offline)",
+      monedaSugerida = offline.monedaSugerida,
+      modoIvaSugerido = offline.modoIvaSugerido,
+      textoOriginal = rawText,
+    )
+  }
 
   suspend fun importImagesFromUris(
     proveedorId: Long,
@@ -349,9 +479,10 @@ class CatalogImporter(
       ext == "pdf" || mimeType.contains("pdf") -> CatalogoFormato.PDF
       ext == "xlsx" || ext == "xlsm" || ext == "xls" ||
         mimeType.contains("spreadsheet") || mimeType.contains("excel") -> CatalogoFormato.XLSX
-      ext == "csv" || ext == "tsv" || ext == "txt" ||
-        mimeType.contains("csv") || mimeType.contains("comma-separated") || mimeType.startsWith("text/") ->
+      ext == "csv" || ext == "tsv" ||
+        mimeType.contains("csv") || mimeType.contains("comma-separated") ->
         CatalogoFormato.CSV
+      ext == "txt" || mimeType == "text/plain" -> CatalogoFormato.TEXTO
       else -> CatalogoFormato.PDF
     }
   }

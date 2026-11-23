@@ -39,13 +39,12 @@ import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -116,262 +115,266 @@ fun ProveedoresScreen(
     AppThemeMode.SYSTEM -> isSystemInDarkTheme()
   }
 
-  Scaffold(
-    modifier = modifier.fillMaxSize(),
-    containerColor = MaterialTheme.colorScheme.background,
-    floatingActionButton = {
-      ExtendedFloatingActionButton(
-        onClick = { showAddDialog = true },
-        containerColor = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        shape = RoundedCornerShape(16.dp),
-        icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-        text = { Text("Proveedor", fontWeight = FontWeight.SemiBold) },
-      )
-    },
-  ) { innerPadding ->
-    Column(
+  val heroBrush = remember(isDark) {
+    Brush.horizontalGradient(
+      colors = if (isDark) {
+        listOf(HeroGradientStartDark, HeroGradientEndDark)
+      } else {
+        listOf(HeroGradientStartLight, HeroGradientEndLight)
+      }
+    )
+  }
+
+  Column(
+    modifier = modifier
+      .fillMaxSize()
+      .background(MaterialTheme.colorScheme.background),
+  ) {
+    // Barra superior ultracompacta (siempre visible, sin FAB gigante tapando tarjetas)
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 4.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = "Proveedores",
+          style = MaterialTheme.typography.titleLarge,
+          fontWeight = FontWeight.Bold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+          text = if (proveedores.isEmpty()) "Catálogos y pedidos"
+          else "${proveedores.size} prov. · $totalProductosCatalogos prod.",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+      ) {
+        IconButton(onClick = onCycleTheme, modifier = Modifier.size(38.dp)) {
+          val themeIcon = when (themeMode) {
+            AppThemeMode.DARK -> Icons.Rounded.DarkMode
+            AppThemeMode.LIGHT -> Icons.Rounded.LightMode
+            AppThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
+          }
+          Icon(
+            imageVector = themeIcon,
+            contentDescription = "Cambiar tema (${themeMode.etiqueta})",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+          )
+        }
+        IconButton(onClick = onOpenAiSettings, modifier = Modifier.size(38.dp)) {
+          Icon(
+            imageVector = Icons.Rounded.AutoAwesome,
+            contentDescription = if (aiConfigured) "IA Gemini activa" else "Configurar IA Gemini",
+            tint = if (aiConfigured) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+          )
+        }
+        IconButton(onClick = onOpenOtaDialog, modifier = Modifier.size(38.dp)) {
+          Icon(
+            imageVector = Icons.Rounded.SystemUpdate,
+            contentDescription = "Actualizaciones OTA",
+            tint = if (otaAvailableTag != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+          )
+        }
+        Spacer(Modifier.width(4.dp))
+        FilledTonalIconButton(
+          onClick = { showAddDialog = true },
+          modifier = Modifier.size(36.dp),
+        ) {
+          Icon(Icons.Rounded.Add, contentDescription = "Nuevo proveedor", modifier = Modifier.size(20.dp))
+        }
+      }
+    }
+
+    LazyColumn(
       modifier = Modifier
         .fillMaxSize()
-        .padding(innerPadding)
-        .padding(horizontal = 16.dp),
+        .padding(horizontal = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+      contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
     ) {
-      Spacer(Modifier.height(10.dp))
-
-      // Encabezado ejecutivo compacto con controles de Tema, IA y OTA
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        Column(modifier = Modifier.weight(1f)) {
-          Text(
-            text = "Pedidos Proveedores",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-          Text(
-            text = if (proveedores.isEmpty()) "Catálogos y reposición Isaac POS"
-            else "${proveedores.size} proveedores · $totalProductosCatalogos productos",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-          IconButton(onClick = onCycleTheme) {
-            val themeIcon = when (themeMode) {
-              AppThemeMode.DARK -> Icons.Rounded.DarkMode
-              AppThemeMode.LIGHT -> Icons.Rounded.LightMode
-              AppThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
-            }
-            Icon(
-              imageVector = themeIcon,
-              contentDescription = "Cambiar tema (${themeMode.etiqueta})",
-              tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
-          IconButton(onClick = onOpenAiSettings) {
-            Icon(
-              imageVector = Icons.Rounded.AutoAwesome,
-              contentDescription = if (aiConfigured) "IA Gemini activa" else "Configurar IA Gemini",
-              tint = if (aiConfigured) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
-          IconButton(onClick = onOpenOtaDialog) {
-            Icon(
-              imageVector = Icons.Rounded.SystemUpdate,
-              contentDescription = "Actualizaciones OTA",
-              tint = if (otaAvailableTag != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
-        }
-      }
-
       if (otaAvailableTag != null) {
-        Spacer(Modifier.height(8.dp))
-        Surface(
-          shape = RoundedCornerShape(12.dp),
-          color = MaterialTheme.colorScheme.primaryContainer,
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-          modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpenOtaDialog),
-        ) {
-          Row(
+        item(key = "ota_banner") {
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
             modifier = Modifier
               .fillMaxWidth()
-              .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+              .clickable(onClick = onOpenOtaDialog),
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-              Icon(
-                Icons.Rounded.SystemUpdate,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-              )
-              Spacer(Modifier.width(8.dp))
-              Text(
-                text = "Actualización $otaAvailableTag lista",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-              )
-            }
-            TextButton(
-              onClick = onOpenOtaDialog,
-              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-              Text("Actualizar", fontWeight = FontWeight.Bold)
+              Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Icon(
+                  Icons.Rounded.SystemUpdate,
+                  contentDescription = null,
+                  modifier = Modifier.size(16.dp),
+                  tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                  text = "Actualización $otaAvailableTag disponible",
+                  style = MaterialTheme.typography.labelMedium,
+                  color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+              }
+              TextButton(
+                onClick = onOpenOtaDialog,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+              ) {
+                Text("Instalar", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+              }
             }
           }
         }
       }
 
-      Spacer(Modifier.height(10.dp))
-
-      // Panel Hero Ejecutivo estilo Isaac POS (degradado cian -> esmeralda + 3 KPIs rápidos)
-      val heroBrush = Brush.horizontalGradient(
-        colors = if (isDark) {
-          listOf(HeroGradientStartDark, HeroGradientEndDark)
-        } else {
-          listOf(HeroGradientStartLight, HeroGradientEndLight)
-        }
-      )
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(16.dp))
-          .background(heroBrush)
-          .clickable(onClick = onOpenIsaacPos)
-          .padding(horizontal = 14.dp, vertical = 12.dp),
-      ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-          ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-              Surface(
-                color = Color.White.copy(alpha = 0.16f),
-                shape = CircleShape,
-                modifier = Modifier.size(30.dp),
-              ) {
-                Box(contentAlignment = Alignment.Center) {
-                  Icon(
-                    Icons.Rounded.CloudSync,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(17.dp),
-                  )
+      // Panel Hero compacto dentro del scroll (libera ~45% de pantalla al deslizar)
+      item(key = "hero_isaac_pos") {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(heroBrush)
+            .clickable(onClick = onOpenIsaacPos)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Surface(
+                  color = Color.White.copy(alpha = 0.16f),
+                  shape = CircleShape,
+                  modifier = Modifier.size(26.dp),
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                      Icons.Rounded.CloudSync,
+                      contentDescription = null,
+                      tint = Color.White,
+                      modifier = Modifier.size(15.dp),
+                    )
+                  }
                 }
-              }
-              Spacer(Modifier.width(8.dp))
-              Column {
+                Spacer(Modifier.width(8.dp))
                 Text(
-                  text = if (isaacPosSyncedCount > 0) "Isaac POS sincronizado" else "Conectar Isaac POS",
-                  style = MaterialTheme.typography.labelLarge,
+                  text = if (isaacPosSyncedCount > 0) "Isaac POS · $isaacPosSyncedCount prod. ($isaacPosWithStockCount c/stock)"
+                  else "Conectar proveedores Isaac POS",
+                  style = MaterialTheme.typography.labelMedium,
+                  fontWeight = FontWeight.SemiBold,
+                  color = Color.White,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
+              Surface(
+                color = Color.White.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(16.dp),
+              ) {
+                Text(
+                  text = "Sync",
+                  style = MaterialTheme.typography.labelSmall,
                   fontWeight = FontWeight.Bold,
                   color = Color.White,
-                )
-                Text(
-                  text = if (isaacPosSyncedCount > 0) "$isaacPosSyncedCount en nube · $isaacPosWithStockCount con stock"
-                  else "Toca para vincular tu inventario real",
-                  style = MaterialTheme.typography.labelSmall,
-                  color = Color.White.copy(alpha = 0.82f),
+                  modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
                 )
               }
             }
-            Surface(
-              color = Color.White.copy(alpha = 0.18f),
-              shape = RoundedCornerShape(20.dp),
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-              Text(
-                text = "Abrir",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+              HeroKpiBox(
+                value = proveedores.size.toString(),
+                label = "Proveedores",
+                accent = Color.White,
+                modifier = Modifier.weight(1f),
+              )
+              HeroKpiBox(
+                value = totalProductosCatalogos.toString(),
+                label = "Productos",
+                accent = Color(0xFF67E8F9),
+                modifier = Modifier.weight(1f),
+              )
+              HeroKpiBox(
+                value = totalBajoStock.toString(),
+                label = "Bajo stock",
+                accent = if (totalBajoStock > 0) Color(0xFFFDE047) else Color(0xFF6EE7B7),
+                modifier = Modifier.weight(1f),
               )
             }
-          }
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-          ) {
-            HeroKpiBox(
-              value = proveedores.size.toString(),
-              label = "Proveedores",
-              accent = Color.White,
-              modifier = Modifier.weight(1f),
-            )
-            HeroKpiBox(
-              value = totalProductosCatalogos.toString(),
-              label = "Productos",
-              accent = Color(0xFF67E8F9),
-              modifier = Modifier.weight(1f),
-            )
-            HeroKpiBox(
-              value = totalBajoStock.toString(),
-              label = "Bajo stock",
-              accent = if (totalBajoStock > 0) Color(0xFFFDE047) else Color(0xFF6EE7B7),
-              modifier = Modifier.weight(1f),
-            )
           }
         }
       }
 
-      Spacer(Modifier.height(10.dp))
-
       if (proveedores.isNotEmpty()) {
-        OutlinedTextField(
-          value = searchQuery,
-          onValueChange = { searchQuery = it },
-          placeholder = { Text("Buscar proveedor o teléfono...") },
-          leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
-          trailingIcon = if (searchQuery.isNotEmpty()) {
-            {
-              IconButton(onClick = { searchQuery = "" }) {
-                Icon(Icons.Rounded.Close, contentDescription = "Limpiar", modifier = Modifier.size(18.dp))
+        item(key = "search_bar") {
+          OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Buscar proveedor o WhatsApp...") },
+            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            trailingIcon = if (searchQuery.isNotEmpty()) {
+              {
+                IconButton(onClick = { searchQuery = "" }) {
+                  Icon(Icons.Rounded.Close, contentDescription = "Limpiar", modifier = Modifier.size(18.dp))
+                }
               }
-            }
-          } else null,
-          singleLine = true,
-          shape = RoundedCornerShape(12.dp),
-          modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(10.dp))
+            } else null,
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+          )
+        }
       }
 
       if (proveedores.isEmpty()) {
-        EmptyProveedoresState(onAddClick = { showAddDialog = true })
-      } else if (filtered.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-          Text(
-            "No hay proveedores que coincidan con \"$searchQuery\"",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
+        item(key = "empty_state") {
+          EmptyProveedoresState(onAddClick = { showAddDialog = true })
         }
-      } else {
-        LazyColumn(
-          verticalArrangement = Arrangement.spacedBy(8.dp),
-          contentPadding = PaddingValues(bottom = 88.dp),
-        ) {
-          items(filtered, key = { it.proveedor.id }) { resumen ->
-            ProveedorCard(
-              resumen = resumen,
-              onOpenCatalog = { onOpenProveedor(resumen.proveedor.id) },
-              onStartOrder = { onStartOrder(resumen.proveedor.id) },
+      } else if (filtered.isEmpty()) {
+        item(key = "empty_filter") {
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(vertical = 32.dp),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              "No hay proveedores que coincidan con \"$searchQuery\"",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
           }
+        }
+      } else {
+        items(filtered, key = { it.proveedor.id }) { resumen ->
+          ProveedorCard(
+            resumen = resumen,
+            onOpenCatalog = { onOpenProveedor(resumen.proveedor.id) },
+            onStartOrder = { onStartOrder(resumen.proveedor.id) },
+          )
         }
       }
     }
@@ -443,31 +446,31 @@ private fun ProveedorCard(
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 12.dp, vertical = 10.dp),
+        .padding(horizontal = 10.dp, vertical = 8.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Surface(
         color = avatarColor.copy(alpha = 0.14f),
-        shape = RoundedCornerShape(11.dp),
+        shape = RoundedCornerShape(10.dp),
         border = BorderStroke(1.dp, avatarColor.copy(alpha = 0.28f)),
-        modifier = Modifier.size(42.dp),
+        modifier = Modifier.size(38.dp),
       ) {
         Box(contentAlignment = Alignment.Center) {
           Text(
             text = initials,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
             color = avatarColor,
           )
         }
       }
 
-      Spacer(Modifier.width(10.dp))
+      Spacer(Modifier.width(9.dp))
 
-      Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+      Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
           text = prov.nombre,
-          style = MaterialTheme.typography.titleSmall,
+          style = MaterialTheme.typography.bodyMedium,
           fontWeight = FontWeight.Bold,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -477,19 +480,19 @@ private fun ProveedorCard(
             Icon(
               Icons.Rounded.Phone,
               contentDescription = null,
-              modifier = Modifier.size(12.dp),
+              modifier = Modifier.size(11.dp),
               tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(3.dp))
             Text(
               text = prov.telefonoWhatsApp,
-              style = MaterialTheme.typography.bodySmall,
+              style = MaterialTheme.typography.labelSmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               maxLines = 1,
             )
           }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
           StatPill(
             icon = Icons.Rounded.Inventory2,
             text = "${resumen.cantidadProductos}",
@@ -499,7 +502,7 @@ private fun ProveedorCard(
           if (resumen.cantidadCatalogos > 0) {
             StatPill(
               icon = Icons.Rounded.Description,
-              text = "${resumen.cantidadCatalogos} cat.",
+              text = "${resumen.cantidadCatalogos} listas",
               tint = MaterialTheme.colorScheme.primary,
               bg = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
             )
@@ -515,16 +518,16 @@ private fun ProveedorCard(
         }
       }
 
-      Spacer(Modifier.width(8.dp))
+      Spacer(Modifier.width(6.dp))
 
       FilledTonalButton(
         onClick = onStartOrder,
         shape = RoundedCornerShape(10.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
       ) {
-        Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null, modifier = Modifier.size(16.dp))
+        Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null, modifier = Modifier.size(15.dp))
         Spacer(Modifier.width(4.dp))
-        Text("Pedir", style = MaterialTheme.typography.labelLarge)
+        Text("Pedir", style = MaterialTheme.typography.labelMedium)
       }
     }
   }

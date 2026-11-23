@@ -38,6 +38,7 @@ import androidx.navigation3.ui.NavDisplay
 import com.pedidos.proveedores.data.local.AppThemeMode
 import com.pedidos.proveedores.domain.model.Pedido
 import com.pedidos.proveedores.domain.model.PedidoEstado
+import com.pedidos.proveedores.domain.parser.PendingSharedPayload
 import com.pedidos.proveedores.domain.pricing.PricingIntelligenceEngine
 import com.pedidos.proveedores.domain.whatsapp.WhatsAppOrderFormatter
 import com.pedidos.proveedores.domain.whatsapp.WhatsAppSender
@@ -45,6 +46,7 @@ import com.pedidos.proveedores.ui.AppViewModel
 import com.pedidos.proveedores.ui.OtaUiState
 import com.pedidos.proveedores.ui.components.AiSettingsDialog
 import com.pedidos.proveedores.ui.components.OtaUpdateDialog
+import com.pedidos.proveedores.ui.components.SharedProviderPickerDialog
 import com.pedidos.proveedores.ui.components.WhatsAppPreviewDialog
 import com.pedidos.proveedores.ui.screens.ConciliarCatalogoScreen
 import com.pedidos.proveedores.ui.screens.HistorialPedidosScreen
@@ -57,6 +59,7 @@ import com.pedidos.proveedores.ui.screens.ProveedorDetalleScreen
 import com.pedidos.proveedores.ui.screens.ProveedoresScreen
 import com.pedidos.proveedores.ui.screens.VisorImagenScreen
 import com.pedidos.proveedores.ui.screens.VisorPdfScreen
+import com.pedidos.proveedores.ui.screens.VisorTextoScreen
 
 private const val TAB_PROVEEDORES = 0
 private const val TAB_PRECIOS = 1
@@ -68,6 +71,8 @@ fun MainNavigation(
   viewModel: AppViewModel,
   themeMode: AppThemeMode = AppThemeMode.SYSTEM,
   onCycleTheme: () -> Unit = {},
+  pendingSharedPayload: PendingSharedPayload? = null,
+  onConsumeSharedPayload: () -> Unit = {},
 ) {
   val context = LocalContext.current
   val backStack = rememberNavBackStack(HomeRoute)
@@ -315,8 +320,13 @@ fun MainNavigation(
                 viewModel.startImagesImport(route.proveedorId, uris)
                 backStack.add(ImportarCatalogoRoute(route.proveedorId))
               },
+              onPickCatalogText = { rawText ->
+                viewModel.startPlainTextImport(route.proveedorId, rawText)
+                backStack.add(ImportarCatalogoRoute(route.proveedorId))
+              },
               onOpenPdf = { ruta, titulo -> backStack.add(VisorPdfRoute(ruta, titulo)) },
               onOpenImages = { rutas, titulo -> backStack.add(VisorImagenRoute(rutas, titulo)) },
+              onOpenText = { ruta, titulo -> backStack.add(VisorTextoRoute(ruta, titulo)) },
               onDeleteCatalogo = { catId, delProds -> viewModel.deleteCatalogo(catId, delProds) },
               onUpdateCatalogoPricing = { catId, moneda, tasaFija, modoIva, ivaPct ->
                 viewModel.updateCatalogPricingConfig(catId, moneda, tasaFija, modoIva, ivaPct)
@@ -343,21 +353,22 @@ fun MainNavigation(
               onToggleItem = { viewModel.toggleImportedItem(it) },
               onSelectAll = { viewModel.selectAllImported(it) },
               onUpdateItem = { viewModel.updateImportedItem(it) },
-              onSetReplaceExisting = { viewModel.setReplaceExisting(it) },
+              onSetImportMode = { viewModel.setImportMode(it) },
               onSetPricingConfig = { moneda, tasaFija, modoIva, ivaPct ->
                 viewModel.setImportPricingConfig(moneda, tasaFija, modoIva, ivaPct)
               },
               onOpenPdfPreview = { ruta, titulo -> backStack.add(VisorPdfRoute(ruta, titulo)) },
               onOpenImagesPreview = { rutas, titulo -> backStack.add(VisorImagenRoute(rutas, titulo)) },
+              onOpenTextPreview = { ruta, titulo -> backStack.add(VisorTextoRoute(ruta, titulo)) },
               onExtractWithAi = { viewModel.reExtractCurrentWithGemini() },
               onOpenAiSettings = {
                 viewModel.resetAiTestFeedback()
                 showAiSettingsDialog = true
               },
               onConfirmImport = {
-                viewModel.confirmCatalogImport {
+                viewModel.confirmCatalogImport { saveRes ->
                   backStack.removeLastOrNull()
-                  if (isaacPosProductos.isNotEmpty()) {
+                  if (saveRes.unlinkedCount > 0 && isaacPosProductos.isNotEmpty()) {
                     backStack.add(ConciliarCatalogoRoute(route.proveedorId))
                   }
                 }
@@ -408,6 +419,18 @@ fun MainNavigation(
             VisorImagenScreen(
               rutas = route.rutas,
               titulo = route.titulo,
+              onBack = { backStack.removeLastOrNull() },
+            )
+          }
+
+          entry<VisorTextoRoute> { route ->
+            VisorTextoScreen(
+              rutaLocal = route.rutaLocal,
+              titulo = route.titulo,
+              onCopyText = { txt ->
+                WhatsAppSender.copyToClipboard(context, txt)
+                viewModel.showMessage("Texto copiado al portapapeles")
+              },
               onBack = { backStack.removeLastOrNull() },
             )
           }
@@ -488,6 +511,33 @@ fun MainNavigation(
       onDownloadAndInstall = { viewModel.downloadAndInstallOta() },
       onInstallDownloaded = { viewModel.installDownloadedOta() },
       onDismiss = { showOtaDialog = false },
+    )
+  }
+
+  pendingSharedPayload?.let { payload ->
+    fun launchPayloadForProvider(provId: Long) {
+      onConsumeSharedPayload()
+      when (payload) {
+        is PendingSharedPayload.SingleFile -> viewModel.startCatalogImport(provId, payload.stagedUri)
+        is PendingSharedPayload.MultipleImages -> viewModel.startImagesImport(provId, payload.stagedUris)
+        is PendingSharedPayload.PlainText -> viewModel.startPlainTextImport(provId, payload.text, payload.subject)
+      }
+      if (backStack.lastOrNull() != ProveedorDetalleRoute(provId)) {
+        backStack.add(ProveedorDetalleRoute(provId))
+      }
+      backStack.add(ImportarCatalogoRoute(provId))
+    }
+
+    SharedProviderPickerDialog(
+      payload = payload,
+      proveedores = proveedores,
+      onSelectProveedor = { provId -> launchPayloadForProvider(provId) },
+      onCreateProveedorAndImport = { newProv ->
+        viewModel.saveProveedor(newProv) { newId ->
+          launchPayloadForProvider(newId)
+        }
+      },
+      onDismiss = onConsumeSharedPayload,
     )
   }
 

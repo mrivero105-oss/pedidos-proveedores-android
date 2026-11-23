@@ -11,10 +11,12 @@ import com.pedidos.proveedores.domain.isaacpos.IsaacPosSyncSummary
 import com.pedidos.proveedores.domain.isaacpos.RemoteProviderSeed
 import com.pedidos.proveedores.domain.pricing.PricingIntelligenceEngine
 import com.pedidos.proveedores.domain.reconcile.CatalogReconciliationLink
+import com.pedidos.proveedores.domain.model.CatalogImportSaveResult
 import com.pedidos.proveedores.domain.model.CatalogoArchivo
 import com.pedidos.proveedores.domain.model.CatalogoFormato
 import com.pedidos.proveedores.domain.model.HistorialPrecio
 import com.pedidos.proveedores.domain.model.IsaacPosProducto
+import com.pedidos.proveedores.domain.model.ModoImportacionCatalogo
 import com.pedidos.proveedores.domain.model.ModoIvaCatalogo
 import com.pedidos.proveedores.domain.model.MonedaCatalogo
 import com.pedidos.proveedores.domain.model.Pedido
@@ -61,13 +63,13 @@ interface PedidosRepository {
     formato: CatalogoFormato,
     rutaLocal: String,
     productosImportados: List<ProductoImportado>,
-    reemplazarExistentes: Boolean,
+    modoImportacion: ModoImportacionCatalogo = ModoImportacionCatalogo.ACTUALIZAR_Y_AGREGAR,
     moneda: MonedaCatalogo = MonedaCatalogo.USD,
     tasaFijaBs: Double? = null,
     modoIva: ModoIvaCatalogo = ModoIvaCatalogo.INCLUIDO,
     porcentajeIva: Double = 16.0,
     pricingSettings: PricingSettings = PricingSettings(),
-  ): Long
+  ): CatalogImportSaveResult
 
   suspend fun updateCatalogPricingConfig(
     catalogoId: Long,
@@ -280,13 +282,13 @@ class SqlitePedidosRepository(
     formato: CatalogoFormato,
     rutaLocal: String,
     productosImportados: List<ProductoImportado>,
-    reemplazarExistentes: Boolean,
+    modoImportacion: ModoImportacionCatalogo,
     moneda: MonedaCatalogo,
     tasaFijaBs: Double?,
     modoIva: ModoIvaCatalogo,
     porcentajeIva: Double,
     pricingSettings: PricingSettings,
-  ): Long = withContext(Dispatchers.IO) {
+  ): CatalogImportSaveResult = withContext(Dispatchers.IO) {
     val db = dbHelper.writableDatabase
     val seleccionados = productosImportados.filter { it.seleccionado && it.nombre.isNotBlank() }
     val posById = loadIsaacPosCache(db).associateBy { it.productoId }
@@ -294,15 +296,21 @@ class SqlitePedidosRepository(
     val existingByCode = existingForProv
       .filter { it.codigo.isNotBlank() }
       .associateBy { it.codigo.trim().lowercase() }
+      .toMutableMap()
     val existingByName = existingForProv
       .associateBy { IsaacPosSyncMatcher.normalizeKey(it.nombre) }
+      .toMutableMap()
 
+    val replaceAll = modoImportacion == ModoImportacionCatalogo.REEMPLAZAR_TODO
     val now = System.currentTimeMillis()
     var catalogoId = 0L
+    var updatedCount = 0
+    var insertedCount = 0
+    var unlinkedCount = 0
 
     db.beginTransaction()
     try {
-      if (reemplazarExistentes) {
+      if (replaceAll) {
         db.delete("productos", "proveedor_id = ?", arrayOf(proveedorId.toString()))
       }
 
@@ -337,21 +345,91 @@ class SqlitePedidosRepository(
       )
 
       for (item in seleccionados) {
-        val prevMatch = item.codigo.trim().lowercase().takeIf { it.isNotBlank() }?.let { existingByCode[it] }
-          ?: existingByName[IsaacPosSyncMatcher.normalizeKey(item.nombre)]
-        // Al reemplazar catálogo, conservar vínculo POS y overrides de empaque/IVA de coincidencias exactas
-        val preservedPosId = if (reemplazarExistentes) prevMatch?.isaacPosId else null
-        val preservedStock = if (reemplazarExistentes) prevMatch?.stockPos else null
-        val preservedPvp = if (reemplazarExistentes) prevMatch?.precioVentaPos else null
-        val preservedPack = if (reemplazarExistentes) prevMatch?.unidadesPorEmpaque else null
-        val preservedTax = if (reemplazarExistentes) prevMatch?.esGravado else null
+        val codeKey = item.codigo.trim().lowercase()
+        val nameKey = IsaacPosSyncMatcher.normalizeKey(item.nombre)
+        val prevMatch = codeKey.takeIf { it.isNotBlank() }?.let { existingByCode[it] }
+          ?: existingByName[nameKey]
+
+        if (!replaceAll && prevMatch != null) {
+          // Modo inteligente ACTUALIZAR_Y_AGREGAR: actualiza costo y metadatos sin duplicar ni perder vínculo POS
+          val newUnit = item.unidad.trim().ifBlank { "u" }
+          val finalUnit = if (newUnit.equals("u", true) && !prevMatch.unidad.equals("u", true)) {
+            prevMatch.unidad
+          } else {
+            newUnit
+          }
+          val finalCode = if (prevMatch.codigo.isBlank() && item.codigo.isNotBlank()) item.codigo.trim() else prevMatch.codigo
+          val finalImage = prevMatch.imagenRuta?.takeIf { it.isNotBlank() } ?: item.imagenRuta
+          val finalPrice = item.precio ?: prevMatch.precio
+
+          val updValues = ContentValues().apply {
+            put("catalogo_id", catalogoId)
+            put("codigo", finalCode)
+            put("unidad", finalUnit)
+            if (finalPrice != null) put("precio", finalPrice) else putNull("precio")
+            if (finalImage != null) put("imagen_ruta", finalImage) else putNull("imagen_ruta")
+            if (item.paginaPdf != null) put("pagina_pdf", item.paginaPdf)
+          }
+          db.update("productos", updValues, "id = ?", arrayOf(prevMatch.id.toString()))
+          updatedCount++
+          if (prevMatch.isaacPosId.isNullOrBlank()) {
+            unlinkedCount++
+          }
+
+          val updatedProd = prevMatch.copy(
+            catalogoId = catalogoId,
+            codigo = finalCode,
+            unidad = finalUnit,
+            precio = finalPrice,
+            imagenRuta = finalImage,
+          )
+          if (finalCode.isNotBlank()) existingByCode[finalCode.lowercase()] = updatedProd
+          existingByName[nameKey] = updatedProd
+
+          val price = item.precio
+          if (price != null && price > 0.0) {
+            val pos = prevMatch.isaacPosId?.let { posById[it] }
+            val (unitUsd, tasaUsada) = PricingIntelligenceEngine.computeEffectiveUnitCostUsd(
+              rawPrice = price,
+              producto = updatedProd,
+              catalogo = newCatalogModel,
+              posProduct = pos,
+              settings = pricingSettings,
+            )
+            if (unitUsd != null && unitUsd > 0.0) {
+              insertPriceHistoryRow(
+                db = db,
+                proveedorId = proveedorId,
+                productoId = prevMatch.id,
+                isaacPosId = prevMatch.isaacPosId,
+                catalogoId = catalogoId,
+                nombreProducto = updatedProd.nombre,
+                unidad = finalUnit,
+                precioOriginal = price,
+                moneda = moneda,
+                tasaUsadaBs = tasaUsada,
+                costoUnitarioUsd = unitUsd,
+                registradoEn = now,
+              )
+            }
+          }
+          continue
+        }
+
+        // Inserción nueva (o reemplazo completo preservando vínculo POS y overrides de coincidencias exactas)
+        val preservedPosId = if (replaceAll) prevMatch?.isaacPosId else null
+        val preservedStock = if (replaceAll) prevMatch?.stockPos else null
+        val preservedPvp = if (replaceAll) prevMatch?.precioVentaPos else null
+        val preservedPack = if (replaceAll) prevMatch?.unidadesPorEmpaque else null
+        val preservedTax = if (replaceAll) prevMatch?.esGravado else null
+        val finalUnit = item.unidad.trim().ifBlank { "u" }
 
         val prodValues = ContentValues().apply {
           put("proveedor_id", proveedorId)
           put("catalogo_id", catalogoId)
           put("codigo", item.codigo.trim())
           put("nombre", item.nombre.trim())
-          put("unidad", item.unidad.trim().ifBlank { "u" })
+          put("unidad", finalUnit)
           if (item.precio != null) put("precio", item.precio) else putNull("precio")
           put("categoria", item.categoria.trim())
           if (item.imagenRuta != null) put("imagen_ruta", item.imagenRuta) else putNull("imagen_ruta")
@@ -367,28 +445,35 @@ class SqlitePedidosRepository(
           }
         }
         val newProdId = db.insertOrThrow("productos", null, prodValues)
+        insertedCount++
+        if (preservedPosId.isNullOrBlank()) {
+          unlinkedCount++
+        }
+
+        val insertedProd = Producto(
+          id = newProdId,
+          proveedorId = proveedorId,
+          catalogoId = catalogoId,
+          codigo = item.codigo.trim(),
+          nombre = item.nombre.trim(),
+          unidad = finalUnit,
+          precio = item.precio,
+          categoria = item.categoria.trim(),
+          stockPos = preservedStock,
+          precioVentaPos = preservedPvp,
+          isaacPosId = preservedPosId,
+          unidadesPorEmpaque = preservedPack,
+          esGravado = preservedTax,
+        )
+        if (codeKey.isNotBlank()) existingByCode[codeKey] = insertedProd
+        existingByName[nameKey] = insertedProd
 
         val price = item.precio
         if (price != null && price > 0.0) {
-          val tempProd = Producto(
-            id = newProdId,
-            proveedorId = proveedorId,
-            catalogoId = catalogoId,
-            codigo = item.codigo.trim(),
-            nombre = item.nombre.trim(),
-            unidad = item.unidad.trim().ifBlank { "u" },
-            precio = price,
-            categoria = item.categoria.trim(),
-            stockPos = preservedStock,
-            precioVentaPos = preservedPvp,
-            isaacPosId = preservedPosId,
-            unidadesPorEmpaque = preservedPack,
-            esGravado = preservedTax,
-          )
           val pos = preservedPosId?.let { posById[it] }
           val (unitUsd, tasaUsada) = PricingIntelligenceEngine.computeEffectiveUnitCostUsd(
             rawPrice = price,
-            producto = tempProd,
+            producto = insertedProd,
             catalogo = newCatalogModel,
             posProduct = pos,
             settings = pricingSettings,
@@ -401,7 +486,7 @@ class SqlitePedidosRepository(
               isaacPosId = preservedPosId,
               catalogoId = catalogoId,
               nombreProducto = item.nombre.trim(),
-              unidad = item.unidad.trim().ifBlank { "u" },
+              unidad = finalUnit,
               precioOriginal = price,
               moneda = moneda,
               tasaUsadaBs = tasaUsada,
@@ -418,7 +503,12 @@ class SqlitePedidosRepository(
     }
 
     reloadSync()
-    catalogoId
+    CatalogImportSaveResult(
+      catalogoId = catalogoId,
+      updatedCount = updatedCount,
+      insertedCount = insertedCount,
+      unlinkedCount = unlinkedCount,
+    )
   }
 
   override suspend fun updateCatalogPricingConfig(

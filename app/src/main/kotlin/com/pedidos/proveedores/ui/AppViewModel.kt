@@ -20,10 +20,12 @@ import com.pedidos.proveedores.domain.pricing.BcvRateClient
 import com.pedidos.proveedores.domain.pricing.OptimalOrderPlan
 import com.pedidos.proveedores.domain.pricing.PricingIntelligenceEngine
 import com.pedidos.proveedores.domain.reconcile.CatalogReconciliationLink
+import com.pedidos.proveedores.domain.model.CatalogImportSaveResult
 import com.pedidos.proveedores.domain.model.CatalogoArchivo
 import com.pedidos.proveedores.domain.model.CatalogoFormato
 import com.pedidos.proveedores.domain.model.HistorialPrecio
 import com.pedidos.proveedores.domain.model.IsaacPosProducto
+import com.pedidos.proveedores.domain.model.ModoImportacionCatalogo
 import com.pedidos.proveedores.domain.model.ModoIvaCatalogo
 import com.pedidos.proveedores.domain.model.MonedaCatalogo
 import com.pedidos.proveedores.domain.model.Pedido
@@ -58,7 +60,7 @@ sealed interface CatalogImportUiState {
   data class Ready(
     val proveedorId: Long,
     val resultado: ResultadoImportacion,
-    val reemplazarExistentes: Boolean = false,
+    val modoImportacion: ModoImportacionCatalogo = ModoImportacionCatalogo.ACTUALIZAR_Y_AGREGAR,
     val moneda: MonedaCatalogo = MonedaCatalogo.USD,
     val tasaFijaBs: Double? = null,
     val modoIva: ModoIvaCatalogo = ModoIvaCatalogo.INCLUIDO,
@@ -555,7 +557,10 @@ class AppViewModel(
         _importState.value = CatalogImportUiState.Ready(
           proveedorId = proveedorId,
           resultado = result,
-          reemplazarExistentes = false,
+          modoImportacion = ModoImportacionCatalogo.ACTUALIZAR_Y_AGREGAR,
+          moneda = result.monedaSugerida ?: MonedaCatalogo.USD,
+          modoIva = result.modoIvaSugerido ?: ModoIvaCatalogo.INCLUIDO,
+          porcentajeIva = pricingSettingsStore.settings.value.defaultIvaPercent,
         )
       } catch (e: Exception) {
         _importState.value = CatalogImportUiState.Error(
@@ -592,7 +597,10 @@ class AppViewModel(
         _importState.value = CatalogImportUiState.Ready(
           proveedorId = proveedorId,
           resultado = result,
-          reemplazarExistentes = false,
+          modoImportacion = ModoImportacionCatalogo.ACTUALIZAR_Y_AGREGAR,
+          moneda = result.monedaSugerida ?: MonedaCatalogo.USD,
+          modoIva = result.modoIvaSugerido ?: ModoIvaCatalogo.INCLUIDO,
+          porcentajeIva = pricingSettingsStore.settings.value.defaultIvaPercent,
         )
       } catch (e: Exception) {
         _importState.value = CatalogImportUiState.Error(
@@ -603,10 +611,54 @@ class AppViewModel(
     }
   }
 
+  fun startPlainTextImport(proveedorId: Long, rawText: String, displayName: String = "") {
+    if (rawText.isBlank()) {
+      showMessage("Pega o comparte una lista de texto con productos")
+      return
+    }
+    _importState.value = CatalogImportUiState.Loading(
+      proveedorId = proveedorId,
+      statusText = "Extrayendo precios de la lista de WhatsApp...",
+      currentPage = 0,
+      totalPages = 1,
+    )
+    viewModelScope.launch {
+      try {
+        val result = catalogImporter.importFromPlainText(
+          proveedorId = proveedorId,
+          rawText = rawText,
+          displayName = displayName,
+          aiSettings = aiSettingsStore.settings.value,
+          onProgress = { cur, total, msg ->
+            _importState.value = CatalogImportUiState.Loading(
+              proveedorId = proveedorId,
+              statusText = msg,
+              currentPage = cur,
+              totalPages = total,
+            )
+          },
+        )
+        _importState.value = CatalogImportUiState.Ready(
+          proveedorId = proveedorId,
+          resultado = result,
+          modoImportacion = ModoImportacionCatalogo.ACTUALIZAR_Y_AGREGAR,
+          moneda = result.monedaSugerida ?: MonedaCatalogo.USD,
+          modoIva = result.modoIvaSugerido ?: ModoIvaCatalogo.INCLUIDO,
+          porcentajeIva = pricingSettingsStore.settings.value.defaultIvaPercent,
+        )
+      } catch (e: Exception) {
+        _importState.value = CatalogImportUiState.Error(
+          proveedorId = proveedorId,
+          mensaje = e.localizedMessage ?: "No se pudo leer la lista de texto.",
+        )
+      }
+    }
+  }
+
   fun reExtractCurrentWithGemini() {
     val current = _importState.value as? CatalogImportUiState.Ready ?: return
     val formato = current.resultado.formato
-    if (formato != CatalogoFormato.PDF && formato != CatalogoFormato.IMAGEN) return
+    if (formato != CatalogoFormato.PDF && formato != CatalogoFormato.IMAGEN && formato != CatalogoFormato.TEXTO) return
     val settings = aiSettingsStore.settings.value
     if (!settings.isConfigured) {
       showMessage("Primero configura tu clave API gratuita de Gemini")
@@ -615,7 +667,7 @@ class AppViewModel(
 
     val displayName = current.resultado.nombreArchivo
     val proveedorId = current.proveedorId
-    val replaceFlag = current.reemplazarExistentes
+    val prevMode = current.modoImportacion
     val prevMoneda = current.moneda
     val prevTasaFija = current.tasaFijaBs
     val prevModoIva = current.modoIva
@@ -623,10 +675,11 @@ class AppViewModel(
 
     _importState.value = CatalogImportUiState.Loading(
       proveedorId = proveedorId,
-      statusText = if (formato == CatalogoFormato.PDF) {
-        "Preparando páginas para Gemini Vision..."
-      } else {
-        "Enviando imágenes a Gemini Vision..."
+      statusText = when (formato) {
+        CatalogoFormato.PDF -> "Preparando páginas para Gemini Vision..."
+        CatalogoFormato.IMAGEN -> "Enviando imágenes a Gemini Vision..."
+        CatalogoFormato.TEXTO -> "Analizando lista de WhatsApp con Gemini..."
+        CatalogoFormato.XLSX, CatalogoFormato.CSV -> "Analizando catálogo..."
       },
     )
 
@@ -665,13 +718,32 @@ class AppViewModel(
               },
             )
           }
+          CatalogoFormato.TEXTO -> {
+            val text = current.resultado.textoOriginal
+              ?: runCatching { File(current.resultado.rutaLocal).readText(Charsets.UTF_8) }.getOrDefault("")
+            catalogImporter.extractTextWithGemini(
+              rawText = text,
+              displayName = displayName,
+              savedFilePath = current.resultado.rutaLocal,
+              apiKey = settings.geminiApiKey,
+              model = settings.geminiModel,
+              onProgress = { cur, total, msg ->
+                _importState.value = CatalogImportUiState.Loading(
+                  proveedorId = proveedorId,
+                  statusText = msg,
+                  currentPage = cur,
+                  totalPages = total,
+                )
+              },
+            )
+          }
           CatalogoFormato.XLSX, CatalogoFormato.CSV -> current.resultado
         }
 
         _importState.value = CatalogImportUiState.Ready(
           proveedorId = proveedorId,
           resultado = aiResult,
-          reemplazarExistentes = replaceFlag,
+          modoImportacion = prevMode,
           moneda = prevMoneda,
           tasaFijaBs = prevTasaFija,
           modoIva = prevModoIva,
@@ -715,10 +787,10 @@ class AppViewModel(
     }
   }
 
-  fun setReplaceExisting(replace: Boolean) {
+  fun setImportMode(modo: ModoImportacionCatalogo) {
     _importState.update { state ->
       if (state !is CatalogImportUiState.Ready) return@update state
-      state.copy(reemplazarExistentes = replace)
+      state.copy(modoImportacion = modo)
     }
   }
 
@@ -739,21 +811,20 @@ class AppViewModel(
     }
   }
 
-  fun confirmCatalogImport(onDone: () -> Unit) {
+  fun confirmCatalogImport(onDone: (CatalogImportSaveResult) -> Unit) {
     val current = _importState.value as? CatalogImportUiState.Ready ?: return
     if (current.guardando) return
     _importState.value = current.copy(guardando = true)
 
     viewModelScope.launch {
       try {
-        val count = current.resultado.productos.count { it.seleccionado && it.nombre.isNotBlank() }
-        repository.saveImportedCatalog(
+        val saveRes = repository.saveImportedCatalog(
           proveedorId = current.proveedorId,
           nombreArchivo = current.resultado.nombreArchivo,
           formato = current.resultado.formato,
           rutaLocal = current.resultado.rutaLocal,
           productosImportados = current.resultado.productos,
-          reemplazarExistentes = current.reemplazarExistentes,
+          modoImportacion = current.modoImportacion,
           moneda = current.moneda,
           tasaFijaBs = current.tasaFijaBs,
           modoIva = current.modoIva,
@@ -761,11 +832,17 @@ class AppViewModel(
           pricingSettings = pricingSettingsStore.settings.value,
         )
         _importState.value = CatalogImportUiState.Idle
-        showMessage(
-          if (count > 0) "Catálogo guardado con $count productos"
-          else "Archivo de catálogo guardado para consulta"
-        )
-        onDone()
+        val msg = when {
+          saveRes.updatedCount > 0 && saveRes.insertedCount > 0 ->
+            "${saveRes.updatedCount} precios actualizados · ${saveRes.insertedCount} nuevos"
+          saveRes.updatedCount > 0 ->
+            "${saveRes.updatedCount} precio(s) actualizados sin duplicar"
+          saveRes.insertedCount > 0 ->
+            "Catálogo guardado con ${saveRes.insertedCount} producto(s)"
+          else -> "Lista guardada para consulta"
+        }
+        showMessage(msg)
+        onDone(saveRes)
       } catch (e: Exception) {
         _importState.value = current.copy(guardando = false)
         showMessage("Error al guardar el catálogo: ${e.localizedMessage ?: "desconocido"}")

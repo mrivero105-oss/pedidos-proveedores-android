@@ -255,12 +255,60 @@ class GeminiCatalogExtractor {
     )
   }
 
+  /**
+   * Extrae productos estructurados de un mensaje de texto largo de WhatsApp con precios y bultos.
+   */
+  suspend fun extractFromPlainText(
+    rawText: String,
+    apiKey: String,
+    model: String = AiSettings.DEFAULT_MODEL,
+    onProgress: (current: Int, total: Int, statusText: String) -> Unit = { _, _, _ -> },
+  ): GeminiExtractResult = withContext(Dispatchers.IO) {
+    val cleanKey = apiKey.trim()
+    require(cleanKey.isNotEmpty()) { "Configura primero tu clave API gratuita de Gemini." }
+    require(rawText.isNotBlank()) { "El texto está vacío." }
+
+    onProgress(1, 1, "Analizando lista de WhatsApp con IA Gemini...")
+    val payload = buildPlainTextRequestPayload(rawText.take(24_000))
+    val result = callGeminiPayloadWithRetry(apiKey = cleanKey, model = model, payload = payload)
+
+    result.fold(
+      onSuccess = { modelText ->
+        val parsed = GeminiResponseParser.parseProductsJson(
+          rawModelText = modelText,
+          defaultPage = 1,
+          startTempId = 1,
+        )
+        GeminiExtractResult(
+          productos = parsed,
+          paginasProcesadas = 1,
+          advertencia = if (parsed.isEmpty()) "La IA analizó el mensaje y no encontró productos con precio." else null,
+        )
+      },
+      onFailure = { err ->
+        GeminiExtractResult(
+          productos = emptyList(),
+          paginasProcesadas = 1,
+          advertencia = "No se pudo analizar con Gemini: ${err.localizedMessage ?: "error temporal"}",
+        )
+      },
+    )
+  }
+
   private suspend fun callGeminiWithRetry(
     apiKey: String,
     model: String,
     pageImages: List<Pair<Int, String>>,
   ): Result<String> {
     val payload = buildBatchRequestPayload(pageImages)
+    return callGeminiPayloadWithRetry(apiKey = apiKey, model = model, payload = payload)
+  }
+
+  private suspend fun callGeminiPayloadWithRetry(
+    apiKey: String,
+    model: String,
+    payload: JSONObject,
+  ): Result<String> {
     val candidates = candidateModelsFor(model)
     var lastError: Throwable? = null
 
@@ -283,6 +331,66 @@ class GeminiCatalogExtractor {
       }
     }
     return Result.failure(lastError ?: IllegalStateException("Límite o alta demanda temporal de Gemini alcanzada."))
+  }
+
+  private fun buildPlainTextRequestPayload(rawText: String): JSONObject {
+    val parts = JSONArray()
+    val prompt = """
+      Eres un extractor de listas de precios de proveedores enviadas por WhatsApp.
+      Analiza el siguiente texto y devuelve ÚNICAMENTE un JSON válido con el campo "productos".
+
+      REGLAS ESTRICTAS:
+      1. Ignora saludos, fechas, cuentas bancarias, RIF, teléfonos, notas de pago, horarios o publicidad.
+      2. Devuelve UN objeto por cada producto/presentación vendible.
+      3. "nombre": nombre limpio del producto con marca y gramaje/volumen (sin emojis ni asteriscos).
+      4. "codigo": SKU o código de barras si aparece; si no, "".
+      5. "unidad": empaque de pedido (ej. "Bulto x 20", "Caja x 12", "Pack x 6", o "u" si es por unidad).
+      6. "precio": número decimal exacto del precio tal cual viene en el mensaje (en USD o Bs., sin convertir moneda); null si no trae precio.
+      7. "categoria": "" (déjalo vacío).
+      8. "pagina": 1.
+
+      TEXTO DEL PROVEEDOR:
+      $rawText
+    """.trimIndent()
+
+    parts.put(JSONObject().put("text", prompt))
+
+    val itemProperties = JSONObject()
+      .put("codigo", JSONObject().put("type", "STRING"))
+      .put("nombre", JSONObject().put("type", "STRING"))
+      .put("unidad", JSONObject().put("type", "STRING"))
+      .put("precio", JSONObject().put("type", "NUMBER").put("nullable", true))
+      .put("categoria", JSONObject().put("type", "STRING"))
+      .put("pagina", JSONObject().put("type", "INTEGER"))
+
+    val schema = JSONObject()
+      .put("type", "OBJECT")
+      .put(
+        "properties",
+        JSONObject().put(
+          "productos",
+          JSONObject()
+            .put("type", "ARRAY")
+            .put(
+              "items",
+              JSONObject()
+                .put("type", "OBJECT")
+                .put("properties", itemProperties)
+                .put("required", JSONArray().put("nombre").put("codigo").put("unidad").put("categoria").put("pagina")),
+            ),
+        ),
+      )
+      .put("required", JSONArray().put("productos"))
+
+    return JSONObject()
+      .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
+      .put(
+        "generationConfig",
+        JSONObject()
+          .put("temperature", 0.0)
+          .put("responseMimeType", "application/json")
+          .put("responseSchema", schema),
+      )
   }
 
   private fun buildBatchRequestPayload(pageImages: List<Pair<Int, String>>): JSONObject {

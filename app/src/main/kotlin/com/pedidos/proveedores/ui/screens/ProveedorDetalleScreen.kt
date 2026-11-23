@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,10 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.automirrored.rounded.CompareArrows
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
@@ -56,6 +59,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,6 +72,7 @@ import com.pedidos.proveedores.domain.model.Producto
 import com.pedidos.proveedores.domain.model.Proveedor
 import com.pedidos.proveedores.domain.parser.PriceParser
 import com.pedidos.proveedores.ui.components.CatalogoPricingDialog
+import com.pedidos.proveedores.ui.components.PasteWhatsAppTextDialog
 import com.pedidos.proveedores.ui.components.ProductThumbnail
 import com.pedidos.proveedores.ui.components.ProductoFormDialog
 import com.pedidos.proveedores.ui.components.ProveedorFormDialog
@@ -74,6 +80,7 @@ import com.pedidos.proveedores.ui.theme.CsvBadgeColor
 import com.pedidos.proveedores.ui.theme.ExcelBadgeColor
 import com.pedidos.proveedores.ui.theme.ImageBadgeColor
 import com.pedidos.proveedores.ui.theme.PdfBadgeColor
+import com.pedidos.proveedores.ui.theme.WhatsAppGreen
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -89,8 +96,10 @@ fun ProveedorDetalleScreen(
   onDeleteProveedor: () -> Unit,
   onPickCatalogFile: (Uri) -> Unit,
   onPickCatalogImages: (List<Uri>) -> Unit,
+  onPickCatalogText: (String) -> Unit = {},
   onOpenPdf: (rutaLocal: String, titulo: String) -> Unit,
   onOpenImages: (rutas: List<String>, titulo: String) -> Unit,
+  onOpenText: (rutaLocal: String, titulo: String) -> Unit = { _, _ -> },
   onDeleteCatalogo: (catalogoId: Long, eliminarProductos: Boolean) -> Unit,
   onUpdateCatalogoPricing: (Long, MonedaCatalogo, Double?, ModoIvaCatalogo, Double) -> Unit = { _, _, _, _, _ -> },
   globalRateBs: Double = 0.0,
@@ -110,6 +119,7 @@ fun ProveedorDetalleScreen(
   var showEditProveedor by remember { mutableStateOf(false) }
   var showDeleteProveedorConfirm by remember { mutableStateOf(false) }
   var showAddProducto by remember { mutableStateOf(false) }
+  var showPasteTextDialog by remember { mutableStateOf(false) }
   var editingProducto by remember { mutableStateOf<Producto?>(null) }
   var deletingCatalogo by remember { mutableStateOf<CatalogoArchivo?>(null) }
   var pricingCatalogo by remember { mutableStateOf<CatalogoArchivo?>(null) }
@@ -146,11 +156,26 @@ fun ProveedorDetalleScreen(
     topBar = {
       TopAppBar(
         title = {
-          Text(
-            text = proveedor.nombre,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
+          Column {
+            Text(
+              text = proveedor.nombre,
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+            val sub = buildList {
+              if (proveedor.telefonoWhatsApp.isNotBlank()) add(proveedor.telefonoWhatsApp)
+              add("${productos.size} prod.")
+            }.joinToString(" · ")
+            Text(
+              text = sub,
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
         },
         navigationIcon = {
           IconButton(onClick = onBack) {
@@ -158,184 +183,184 @@ fun ProveedorDetalleScreen(
           }
         },
         actions = {
-          IconButton(onClick = { showEditProveedor = true }) {
-            Icon(Icons.Rounded.Edit, contentDescription = "Editar proveedor")
+          FilledTonalButton(
+            onClick = onStartOrder,
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+          ) {
+            Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Pedir", style = MaterialTheme.typography.labelMedium)
           }
-          IconButton(onClick = { showDeleteProveedorConfirm = true }) {
-            Icon(Icons.Rounded.Delete, contentDescription = "Eliminar proveedor")
+          IconButton(onClick = { showEditProveedor = true }, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Rounded.Edit, contentDescription = "Editar proveedor", modifier = Modifier.size(18.dp))
+          }
+          IconButton(onClick = { showDeleteProveedorConfirm = true }, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Rounded.Delete, contentDescription = "Eliminar proveedor", modifier = Modifier.size(18.dp))
           }
         },
       )
     },
   ) { innerPadding ->
+    val unlinkedCount = remember(productos) { productos.count { it.isaacPosId.isNullOrBlank() } }
+
     LazyColumn(
       modifier = Modifier
         .fillMaxSize()
         .padding(innerPadding)
-        .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
-      contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
+        .padding(horizontal = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+      contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
     ) {
-      item {
-        Card(
-          shape = RoundedCornerShape(16.dp),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+      if (proveedor.notas.isNotBlank()) {
+        item(key = "prov_notes") {
+          Text(
+            text = proveedor.notas,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+      }
+
+      // Barra de 4 acciones rápidas en 1 sola fila compacta (ahorra ~240.dp verticales)
+      item(key = "quick_actions_row") {
+        Row(
           modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-          Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          QuickActionTile(
+            icon = Icons.Rounded.UploadFile,
+            label = "PDF/Excel",
+            tint = MaterialTheme.colorScheme.primary,
+            onClick = {
+              filePickerLauncher.launch(
+                arrayOf(
+                  "application/pdf",
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                  "application/vnd.ms-excel",
+                  "text/csv",
+                  "text/comma-separated-values",
+                  "text/plain",
+                  "image/*",
+                  "application/octet-stream",
+                )
+              )
+            },
+            modifier = Modifier.weight(1f),
+          )
+          QuickActionTile(
+            icon = Icons.Rounded.AddPhotoAlternate,
+            label = "Fotos",
+            tint = ImageBadgeColor,
+            onClick = { imagesPickerLauncher.launch(arrayOf("image/*")) },
+            modifier = Modifier.weight(1f),
+          )
+          QuickActionTile(
+            icon = Icons.AutoMirrored.Rounded.Chat,
+            label = "Texto WA",
+            tint = WhatsAppGreen,
+            onClick = { showPasteTextDialog = true },
+            modifier = Modifier.weight(1f),
+          )
+          QuickActionTile(
+            icon = Icons.AutoMirrored.Rounded.CompareArrows,
+            label = if (unlinkedCount > 0) "POS ($unlinkedCount)" else "Conciliar",
+            tint = MaterialTheme.colorScheme.secondary,
+            onClick = onOpenConciliar,
+            modifier = Modifier.weight(1f),
+          )
+        }
+      }
+
+      // Catálogos en carrusel horizontal compacto (no empuja los productos fuera de pantalla)
+      if (catalogos.isNotEmpty()) {
+        item(key = "catalogs_strip") {
+          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-              text = if (proveedor.telefonoWhatsApp.isNotBlank()) {
-                "WhatsApp: ${proveedor.telefonoWhatsApp}"
-              } else {
-                "Sin teléfono WhatsApp registrado"
-              },
-              style = MaterialTheme.typography.bodyMedium,
+              text = "Listas recibidas (${catalogos.size})",
+              style = MaterialTheme.typography.labelLarge,
+              fontWeight = FontWeight.SemiBold,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (proveedor.notas.isNotBlank()) {
-              Text(
-                text = proveedor.notas,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
-            }
-            Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              FilledTonalButton(
-                onClick = {
-                  filePickerLauncher.launch(
-                    arrayOf(
-                      "application/pdf",
-                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                      "application/vnd.ms-excel",
-                      "text/csv",
-                      "text/comma-separated-values",
-                      "text/plain",
-                      "image/*",
-                      "application/octet-stream",
-                    )
-                  )
-                },
-                modifier = Modifier.weight(1f),
-              ) {
-                Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("PDF / Excel")
-              }
-              FilledTonalButton(
-                onClick = {
-                  imagesPickerLauncher.launch(arrayOf("image/*"))
-                },
-                modifier = Modifier.weight(1f),
-              ) {
-                Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Imágenes")
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              items(catalogos, key = { "cat_${it.id}" }) { cat ->
+                CatalogoArchivoCard(
+                  catalogo = cat,
+                  onView = when (cat.formato) {
+                    CatalogoFormato.PDF -> ({ onOpenPdf(cat.rutaLocal, cat.nombreArchivo) })
+                    CatalogoFormato.IMAGEN -> ({ onOpenImages(listOf(cat.rutaLocal), cat.nombreArchivo) })
+                    CatalogoFormato.TEXTO -> ({ onOpenText(cat.rutaLocal, cat.nombreArchivo) })
+                    else -> null
+                  },
+                  viewLabel = when (cat.formato) {
+                    CatalogoFormato.IMAGEN -> "Foto"
+                    CatalogoFormato.TEXTO -> "Texto"
+                    else -> "PDF"
+                  },
+                  onEditPricing = { pricingCatalogo = cat },
+                  onDelete = { deletingCatalogo = cat },
+                )
               }
             }
-            val unlinkedCount = productos.count { it.isaacPosId.isNullOrBlank() }
-            OutlinedButton(
-              onClick = onOpenConciliar,
-              shape = RoundedCornerShape(10.dp),
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Icon(Icons.AutoMirrored.Rounded.CompareArrows, contentDescription = null, modifier = Modifier.size(18.dp))
-              Spacer(Modifier.width(6.dp))
-              Text(
-                if (unlinkedCount > 0) "Conciliar con mi POS ($unlinkedCount sin vincular)"
-                else "Conciliar catálogo con mi Isaac POS"
-              )
-            }
-            Button(
-              onClick = onStartOrder,
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null, modifier = Modifier.size(18.dp))
-              Spacer(Modifier.width(6.dp))
-              Text("Hacer pedido")
-            }
-            Text(
-              text = "Admite PDF, Excel (.xlsx), CSV y una o varias imágenes de galería/WhatsApp.",
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
           }
         }
       }
 
-      if (catalogos.isNotEmpty()) {
-        item {
-          Text(
-            text = "Catálogos subidos (${catalogos.size})",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-          )
-        }
-        items(catalogos, key = { "cat_${it.id}" }) { cat ->
-          CatalogoArchivoCard(
-            catalogo = cat,
-            onView = when (cat.formato) {
-              CatalogoFormato.PDF -> ({ onOpenPdf(cat.rutaLocal, cat.nombreArchivo) })
-              CatalogoFormato.IMAGEN -> ({ onOpenImages(listOf(cat.rutaLocal), cat.nombreArchivo) })
-              else -> null
-            },
-            viewLabel = if (cat.formato == CatalogoFormato.IMAGEN) "Ver foto" else "Ver PDF",
-            onEditPricing = { pricingCatalogo = cat },
-            onDelete = { deletingCatalogo = cat },
-          )
-        }
-      }
-
-      item {
+      item(key = "products_header") {
         Row(
           modifier = Modifier.fillMaxWidth(),
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
           Text(
-            text = "Productos (${productos.size})",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
+            text = "Productos (${filteredProducts.size})",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
           )
-          OutlinedButton(onClick = { showAddProducto = true }) {
-            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+          OutlinedButton(
+            onClick = { showAddProducto = true },
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+          ) {
+            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            Text("Manual")
+            Text("Manual", style = MaterialTheme.typography.labelMedium)
           }
         }
       }
 
       if (productos.isNotEmpty()) {
-        item {
+        item(key = "products_search") {
           OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
             placeholder = { Text("Buscar por nombre o código...") },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
             singleLine = true,
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth(),
           )
         }
       }
 
       if (productos.isEmpty()) {
-        item {
+        item(key = "empty_products") {
           Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth(),
           ) {
             Text(
-              text = "Todavía no hay productos cargados. Sube un catálogo en PDF, Excel, CSV o imágenes, o agrega un producto manual con foto.",
-              style = MaterialTheme.typography.bodyMedium,
+              text = "Todavía no hay productos cargados. Sube un PDF/Excel, fotos o pega una lista de WhatsApp arriba (o compártela directo desde WhatsApp).",
+              style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.padding(16.dp),
+              modifier = Modifier.padding(14.dp),
             )
           }
         }
       } else if (filteredProducts.isEmpty()) {
-        item {
+        item(key = "empty_search") {
           Text(
             text = "Sin resultados para \"$searchQuery\"",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -437,6 +462,17 @@ fun ProveedorDetalleScreen(
     )
   }
 
+  if (showPasteTextDialog) {
+    PasteWhatsAppTextDialog(
+      proveedorNombre = proveedor.nombre,
+      onImportText = { rawText ->
+        showPasteTextDialog = false
+        onPickCatalogText(rawText)
+      },
+      onDismiss = { showPasteTextDialog = false },
+    )
+  }
+
   pricingCatalogo?.let { cat ->
     CatalogoPricingDialog(
       catalogo = cat,
@@ -483,6 +519,37 @@ fun ProveedorDetalleScreen(
 }
 
 @Composable
+private fun QuickActionTile(
+  icon: ImageVector,
+  label: String,
+  tint: Color,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Surface(
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    shape = RoundedCornerShape(11.dp),
+    modifier = modifier.clickable(onClick = onClick),
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+      Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+      Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
+  }
+}
+
+@Composable
 private fun CatalogoArchivoCard(
   catalogo: CatalogoArchivo,
   onView: (() -> Unit)?,
@@ -491,58 +558,68 @@ private fun CatalogoArchivoCard(
   onDelete: () -> Unit,
 ) {
   val dateStr = remember(catalogo.importadoEn) {
-    SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.forLanguageTag("es-ES")).format(Date(catalogo.importadoEn))
+    SimpleDateFormat("dd/MM HH:mm", Locale.forLanguageTag("es-ES")).format(Date(catalogo.importadoEn))
   }
   val badgeColor = when (catalogo.formato) {
     CatalogoFormato.PDF -> PdfBadgeColor
     CatalogoFormato.XLSX -> ExcelBadgeColor
     CatalogoFormato.CSV -> CsvBadgeColor
     CatalogoFormato.IMAGEN -> ImageBadgeColor
+    CatalogoFormato.TEXTO -> WhatsAppGreen
   }
   val icon = when (catalogo.formato) {
     CatalogoFormato.PDF -> Icons.Rounded.PictureAsPdf
     CatalogoFormato.IMAGEN -> Icons.Rounded.Image
+    CatalogoFormato.TEXTO -> Icons.AutoMirrored.Rounded.Chat
     CatalogoFormato.XLSX, CatalogoFormato.CSV -> Icons.Rounded.TableChart
   }
 
   Card(
-    shape = RoundedCornerShape(14.dp),
+    shape = RoundedCornerShape(12.dp),
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    modifier = Modifier.fillMaxWidth(),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    modifier = Modifier.width(236.dp),
   ) {
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(12.dp),
-      verticalAlignment = Alignment.CenterVertically,
+    Column(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      Surface(
-        color = badgeColor.copy(alpha = 0.14f),
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.size(40.dp),
-      ) {
-        Box(contentAlignment = Alignment.Center) {
-          Icon(icon, contentDescription = null, tint = badgeColor)
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+          color = badgeColor.copy(alpha = 0.14f),
+          shape = RoundedCornerShape(8.dp),
+          modifier = Modifier.size(30.dp),
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = badgeColor, modifier = Modifier.size(16.dp))
+          }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = catalogo.nombreArchivo,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+          Text(
+            text = "${catalogo.productosImportados} prod. · $dateStr",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
         }
       }
-      Spacer(Modifier.width(10.dp))
-      Column(modifier = Modifier.weight(1f)) {
-        Text(
-          text = catalogo.nombreArchivo,
-          style = MaterialTheme.typography.bodyMedium,
-          fontWeight = FontWeight.Medium,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-          text = "${catalogo.formato.etiqueta} · ${catalogo.productosImportados} prod. · $dateStr",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
         val pricingMeta = buildString {
           append(catalogo.moneda.simbolo)
           if (catalogo.moneda == MonedaCatalogo.VES && catalogo.tasaFijaBs != null) {
-            append(" (fija ${PriceParser.formatQuantity(catalogo.tasaFijaBs)})")
+            append(" (${PriceParser.formatQuantity(catalogo.tasaFijaBs)})")
           }
           append(" · ${catalogo.modoIva.etiquetaCorta}")
         }
@@ -550,29 +627,36 @@ private fun CatalogoArchivoCard(
           text = pricingMeta,
           style = MaterialTheme.typography.labelSmall,
           color = MaterialTheme.colorScheme.primary,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f),
         )
-      }
-      if (onView != null) {
-        TextButton(
-          onClick = onView,
-          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-        ) {
-          Text(viewLabel)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          if (onView != null) {
+            TextButton(
+              onClick = onView,
+              contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+            ) {
+              Text(viewLabel, style = MaterialTheme.typography.labelSmall)
+            }
+          }
+          IconButton(onClick = onEditPricing, modifier = Modifier.size(28.dp)) {
+            Icon(
+              Icons.Rounded.Tune,
+              contentDescription = "Configurar moneda e IVA",
+              tint = MaterialTheme.colorScheme.primary,
+              modifier = Modifier.size(16.dp),
+            )
+          }
+          IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
+            Icon(
+              Icons.Rounded.Delete,
+              contentDescription = "Eliminar catálogo",
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.size(16.dp),
+            )
+          }
         }
-      }
-      IconButton(onClick = onEditPricing) {
-        Icon(
-          Icons.Rounded.Tune,
-          contentDescription = "Configurar moneda e IVA",
-          tint = MaterialTheme.colorScheme.primary,
-        )
-      }
-      IconButton(onClick = onDelete) {
-        Icon(
-          Icons.Rounded.Delete,
-          contentDescription = "Eliminar catálogo",
-          tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
       }
     }
   }

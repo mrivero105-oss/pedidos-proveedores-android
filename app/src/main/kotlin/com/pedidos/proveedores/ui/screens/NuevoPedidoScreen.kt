@@ -169,7 +169,7 @@ fun NuevoPedidoScreen(
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 16.dp, vertical = 10.dp),
+        .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -178,20 +178,43 @@ fun NuevoPedidoScreen(
       ) {
         Text(
           text = if (draft.editingPedidoId != null) "Editando borrador" else "Nuevo pedido",
-          style = MaterialTheme.typography.headlineSmall,
+          style = MaterialTheme.typography.titleLarge,
           fontWeight = FontWeight.Bold,
         )
-        if (draft.itemCount > 0) {
-          TextButton(onClick = onClearDraft) {
-            Text("Limpiar")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          if (latestPdf != null) {
+            TextButton(
+              onClick = { onOpenPdf(latestPdf.rutaLocal, latestPdf.nombreArchivo) },
+              contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+            ) {
+              Icon(Icons.Rounded.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+              Spacer(Modifier.width(3.dp))
+              Text("PDF", style = MaterialTheme.typography.labelMedium)
+            }
+          }
+          TextButton(
+            onClick = { showManualDialog = true },
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+          ) {
+            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(2.dp))
+            Text("Manual", style = MaterialTheme.typography.labelMedium)
+          }
+          if (draft.itemCount > 0) {
+            TextButton(
+              onClick = onClearDraft,
+              contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+            ) {
+              Text("Limpiar", style = MaterialTheme.typography.labelMedium)
+            }
           }
         }
       }
 
       // Selector horizontal de proveedor
       LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.padding(top = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.padding(top = 4.dp),
       ) {
         items(proveedores, key = { it.proveedor.id }) { item ->
           FilterChip(
@@ -202,75 +225,63 @@ fun NuevoPedidoScreen(
         }
       }
 
-      Spacer(Modifier.height(8.dp))
+      Spacer(Modifier.height(4.dp))
 
-      // Buscador + acciones rápidas (Ver PDF / Solo agregados)
+      // Buscador compacto
       OutlinedTextField(
         value = searchQuery,
         onValueChange = { searchQuery = it },
-        placeholder = { Text("Buscar en catálogo de ${selectedProv.nombre}...") },
-        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+        placeholder = { Text("Buscar en ${selectedProv.nombre}...") },
+        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
         trailingIcon = if (searchQuery.isNotEmpty()) {
           {
             IconButton(onClick = { searchQuery = "" }) {
-              Icon(Icons.Rounded.Close, contentDescription = "Limpiar búsqueda")
+              Icon(Icons.Rounded.Close, contentDescription = "Limpiar búsqueda", modifier = Modifier.size(18.dp))
             }
           }
         } else null,
         singleLine = true,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
       )
 
-      Spacer(Modifier.height(8.dp))
-      Row(
+      Spacer(Modifier.height(4.dp))
+      // Una sola fila horizontal para todos los filtros + prellenar bajo stock (ahorra ~56.dp fijos)
+      LazyRow(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        FilterChip(
-          selected = onlySelected,
-          onClick = { onlySelected = !onlySelected },
-          label = { Text("En pedido (${draft.itemCount})") },
-        )
-        if (hasPosStockData) {
+        item {
           FilterChip(
-            selected = onlyLowStock,
-            onClick = { onlyLowStock = !onlyLowStock },
-            label = { Text("Bajo stock") },
+            selected = onlySelected,
+            onClick = { onlySelected = !onlySelected },
+            label = { Text("En pedido (${draft.itemCount})") },
           )
         }
-        if (latestPdf != null) {
-          OutlinedButton(
-            onClick = { onOpenPdf(latestPdf.rutaLocal, latestPdf.nombreArchivo) },
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-          ) {
-            Icon(Icons.Rounded.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("Ver PDF", style = MaterialTheme.typography.labelMedium)
+        if (hasPosStockData) {
+          item {
+            FilterChip(
+              selected = onlyLowStock,
+              onClick = { onlyLowStock = !onlyLowStock },
+              label = { Text("Bajo stock ($lowStockCount)") },
+            )
           }
         }
-        Spacer(Modifier.weight(1f))
-        TextButton(onClick = { showManualDialog = true }) {
-          Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(2.dp))
-          Text("Manual")
-        }
-      }
-
-      if (lowStockCount > 0) {
-        Spacer(Modifier.height(6.dp))
-        FilledTonalButton(
-          onClick = {
-            onPrefillLowStock()
-            onlySelected = true
-          },
-          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Icon(Icons.Rounded.WarningAmber, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(6.dp))
-          Text("Prellenar bajo stock ($lowStockCount prod.)")
+        if (lowStockCount > 0) {
+          item {
+            FilterChip(
+              selected = false,
+              onClick = {
+                onPrefillLowStock()
+                onlySelected = true
+              },
+              leadingIcon = {
+                Icon(Icons.Rounded.WarningAmber, contentDescription = null, modifier = Modifier.size(15.dp))
+              },
+              label = { Text("Prellenar ($lowStockCount)") },
+            )
+          }
         }
       }
     }
@@ -278,9 +289,9 @@ fun NuevoPedidoScreen(
     LazyColumn(
       modifier = Modifier
         .weight(1f)
-        .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
-      contentPadding = PaddingValues(bottom = 16.dp),
+        .padding(horizontal = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp),
+      contentPadding = PaddingValues(bottom = 14.dp),
     ) {
       if (provProducts.isEmpty()) {
         item {

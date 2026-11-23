@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Edit
@@ -43,7 +44,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -59,6 +59,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pedidos.proveedores.domain.model.CatalogoFormato
+import com.pedidos.proveedores.domain.model.ModoImportacionCatalogo
 import com.pedidos.proveedores.domain.model.ModoIvaCatalogo
 import com.pedidos.proveedores.domain.model.MonedaCatalogo
 import com.pedidos.proveedores.domain.model.ProductoImportado
@@ -77,10 +78,11 @@ fun ImportarCatalogoScreen(
   onToggleItem: (Int) -> Unit,
   onSelectAll: (Boolean) -> Unit,
   onUpdateItem: (ProductoImportado) -> Unit,
-  onSetReplaceExisting: (Boolean) -> Unit,
+  onSetImportMode: (ModoImportacionCatalogo) -> Unit,
   onSetPricingConfig: (MonedaCatalogo, Double?, ModoIvaCatalogo, Double) -> Unit = { _, _, _, _ -> },
   onOpenPdfPreview: (rutaLocal: String, titulo: String) -> Unit,
   onOpenImagesPreview: (rutas: List<String>, titulo: String) -> Unit,
+  onOpenTextPreview: (rutaLocal: String, titulo: String) -> Unit = { _, _ -> },
   onExtractWithAi: () -> Unit,
   onOpenAiSettings: () -> Unit,
   onConfirmImport: () -> Unit,
@@ -102,8 +104,10 @@ fun ImportarCatalogoScreen(
     bottomBar = {
       if (state is CatalogImportUiState.Ready) {
         val selectedCount = state.resultado.productos.count { it.seleccionado }
-        val isVisual = state.resultado.formato == CatalogoFormato.PDF || state.resultado.formato == CatalogoFormato.IMAGEN
-        val canSave = selectedCount > 0 || isVisual
+        val isConsultable = state.resultado.formato == CatalogoFormato.PDF ||
+          state.resultado.formato == CatalogoFormato.IMAGEN ||
+          state.resultado.formato == CatalogoFormato.TEXTO
+        val canSave = selectedCount > 0 || isConsultable
         Surface(
           tonalElevation = 3.dp,
           shadowElevation = 6.dp,
@@ -113,20 +117,20 @@ fun ImportarCatalogoScreen(
             modifier = Modifier
               .fillMaxWidth()
               .navigationBarsPadding()
-              .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+              .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
           ) {
             OutlinedButton(
               onClick = onCancel,
               enabled = !state.guardando,
-              modifier = Modifier.weight(0.4f),
+              modifier = Modifier.weight(0.36f),
             ) {
               Text("Cancelar")
             }
             Button(
               onClick = onConfirmImport,
               enabled = canSave && !state.guardando,
-              modifier = Modifier.weight(0.6f),
+              modifier = Modifier.weight(0.64f),
             ) {
               if (state.guardando) {
                 CircularProgressIndicator(
@@ -139,8 +143,11 @@ fun ImportarCatalogoScreen(
                 Spacer(Modifier.width(6.dp))
                 Text(
                   when {
-                    selectedCount > 0 -> "Importar ($selectedCount)"
+                    selectedCount > 0 && state.modoImportacion == ModoImportacionCatalogo.ACTUALIZAR_Y_AGREGAR ->
+                      "Guardar / Actualizar ($selectedCount)"
+                    selectedCount > 0 -> "Reemplazar ($selectedCount)"
                     state.resultado.formato == CatalogoFormato.IMAGEN -> "Guardar foto"
+                    state.resultado.formato == CatalogoFormato.TEXTO -> "Guardar texto"
                     else -> "Guardar PDF"
                   }
                 )
@@ -210,90 +217,122 @@ fun ImportarCatalogoScreen(
       is CatalogImportUiState.Ready -> {
         val resultado = state.resultado
         val allSelected = resultado.productos.isNotEmpty() && resultado.productos.all { it.seleccionado }
-        val isVisual = resultado.formato == CatalogoFormato.PDF || resultado.formato == CatalogoFormato.IMAGEN
+        val supportsAi = resultado.formato == CatalogoFormato.PDF ||
+          resultado.formato == CatalogoFormato.IMAGEN ||
+          resultado.formato == CatalogoFormato.TEXTO
 
         LazyColumn(
           modifier = Modifier
             .fillMaxSize()
             .padding(innerPadding)
-            .padding(horizontal = 16.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp),
-          contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+            .padding(horizontal = 12.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+          contentPadding = PaddingValues(top = 6.dp, bottom = 20.dp),
         ) {
           item {
             Card(
-              shape = RoundedCornerShape(14.dp),
+              shape = RoundedCornerShape(12.dp),
               colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
               modifier = Modifier.fillMaxWidth(),
             ) {
-              Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+              Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                   text = resultado.nombreArchivo,
                   style = MaterialTheme.typography.titleSmall,
                   fontWeight = FontWeight.Bold,
-                  maxLines = 2,
+                  maxLines = 1,
                   overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                  text = "Formato: ${resultado.formato.etiqueta} · Método: ${resultado.metodoExtraccion} · Detectados: ${resultado.productos.size}",
-                  style = MaterialTheme.typography.bodySmall,
+                  text = "${resultado.formato.etiqueta} · ${resultado.metodoExtraccion} · ${resultado.productos.size} prod.",
+                  style = MaterialTheme.typography.labelSmall,
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                if (isVisual) {
+                if (supportsAi) {
                   Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                       onClick = {
-                        if (resultado.formato == CatalogoFormato.PDF) {
-                          onOpenPdfPreview(resultado.rutaLocal, resultado.nombreArchivo)
-                        } else {
-                          val paths = resultado.rutasImagenesFuente.ifEmpty { listOf(resultado.rutaLocal) }
-                          onOpenImagesPreview(paths, resultado.nombreArchivo)
+                        when (resultado.formato) {
+                          CatalogoFormato.PDF -> onOpenPdfPreview(resultado.rutaLocal, resultado.nombreArchivo)
+                          CatalogoFormato.IMAGEN -> {
+                            val paths = resultado.rutasImagenesFuente.ifEmpty { listOf(resultado.rutaLocal) }
+                            onOpenImagesPreview(paths, resultado.nombreArchivo)
+                          }
+                          CatalogoFormato.TEXTO -> onOpenTextPreview(resultado.rutaLocal, resultado.nombreArchivo)
+                          CatalogoFormato.XLSX, CatalogoFormato.CSV -> Unit
                         }
                       },
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                       modifier = Modifier.weight(1f),
                     ) {
                       Icon(
-                        if (resultado.formato == CatalogoFormato.PDF) Icons.Rounded.PictureAsPdf else Icons.Rounded.Image,
+                        when (resultado.formato) {
+                          CatalogoFormato.PDF -> Icons.Rounded.PictureAsPdf
+                          CatalogoFormato.TEXTO -> Icons.AutoMirrored.Rounded.Chat
+                          else -> Icons.Rounded.Image
+                        },
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(16.dp),
                       )
-                      Spacer(Modifier.width(6.dp))
-                      Text(if (resultado.formato == CatalogoFormato.PDF) "Ver PDF" else "Ver foto(s)")
+                      Spacer(Modifier.width(5.dp))
+                      Text(
+                        when (resultado.formato) {
+                          CatalogoFormato.PDF -> "Ver PDF"
+                          CatalogoFormato.TEXTO -> "Ver texto"
+                          else -> "Ver foto(s)"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                      )
                     }
                     FilledTonalButton(
                       onClick = {
                         if (aiConfigured) onExtractWithAi() else onOpenAiSettings()
                       },
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                       modifier = Modifier.weight(1f),
                     ) {
-                      Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                      Spacer(Modifier.width(6.dp))
-                      Text(if (aiConfigured) "Leer con IA" else "Activar IA")
+                      Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                      Spacer(Modifier.width(5.dp))
+                      Text(
+                        when {
+                          !aiConfigured -> "Activar IA"
+                          resultado.formato == CatalogoFormato.TEXTO -> "Mejorar con IA"
+                          else -> "Leer con IA"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                      )
                     }
                   }
                 }
 
                 if (resultado.productos.isNotEmpty()) {
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                  HorizontalDivider()
+                  Text(
+                    text = "Cómo guardar esta lista",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                  )
+                  FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                   ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                      Text("Reemplazar catálogo anterior", style = MaterialTheme.typography.bodyMedium)
-                      Text(
-                        "Borra los productos viejos de este proveedor antes de cargar los nuevos",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                      )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Switch(
-                      checked = state.reemplazarExistentes,
-                      onCheckedChange = onSetReplaceExisting,
+                    FilterChip(
+                      selected = state.modoImportacion == ModoImportacionCatalogo.ACTUALIZAR_Y_AGREGAR,
+                      onClick = { onSetImportMode(ModoImportacionCatalogo.ACTUALIZAR_Y_AGREGAR) },
+                      label = { Text("Actualizar precios y nuevos") },
+                    )
+                    FilterChip(
+                      selected = state.modoImportacion == ModoImportacionCatalogo.REEMPLAZAR_TODO,
+                      onClick = { onSetImportMode(ModoImportacionCatalogo.REEMPLAZAR_TODO) },
+                      label = { Text("Reemplazar todo") },
                     )
                   }
+                  Text(
+                    text = state.modoImportacion.descripcion,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  )
 
                   HorizontalDivider()
 
@@ -301,12 +340,10 @@ fun ImportarCatalogoScreen(
                   var tasaFijaText by remember(state.resultado.rutaLocal, state.moneda) {
                     mutableStateOf(state.tasaFijaBs?.let { "%.2f".format(Locale.US, it) }.orEmpty())
                   }
-                  Text(
-                    text = "Moneda e IVA de esta lista",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                  )
-                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                  ) {
                     MonedaCatalogo.entries.forEach { monedaOpt ->
                       FilterChip(
                         selected = state.moneda == monedaOpt,
@@ -319,6 +356,20 @@ fun ImportarCatalogoScreen(
                           )
                         },
                         label = { Text(monedaOpt.etiqueta) },
+                      )
+                    }
+                    ModoIvaCatalogo.entries.forEach { modo ->
+                      FilterChip(
+                        selected = state.modoIva == modo,
+                        onClick = {
+                          onSetPricingConfig(
+                            state.moneda,
+                            state.tasaFijaBs,
+                            modo,
+                            state.porcentajeIva,
+                          )
+                        },
+                        label = { Text(modo.etiquetaCorta) },
                       )
                     }
                   }
@@ -346,30 +397,6 @@ fun ImportarCatalogoScreen(
                       modifier = Modifier.fillMaxWidth(),
                     )
                   }
-                  FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                  ) {
-                    ModoIvaCatalogo.entries.forEach { modo ->
-                      FilterChip(
-                        selected = state.modoIva == modo,
-                        onClick = {
-                          onSetPricingConfig(
-                            state.moneda,
-                            state.tasaFijaBs,
-                            modo,
-                            state.porcentajeIva,
-                          )
-                        },
-                        label = { Text(modo.etiquetaCorta) },
-                      )
-                    }
-                  }
-                  Text(
-                    text = state.modoIva.descripcion,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
                 }
               }
             }

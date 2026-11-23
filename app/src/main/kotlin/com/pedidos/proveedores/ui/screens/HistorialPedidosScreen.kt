@@ -67,68 +67,55 @@ fun HistorialPedidosScreen(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .padding(horizontal = 16.dp),
+      .padding(horizontal = 12.dp),
   ) {
-    Spacer(Modifier.height(12.dp))
-    Text(
-      text = "Historial de pedidos",
-      style = MaterialTheme.typography.headlineSmall,
-      fontWeight = FontWeight.Bold,
-    )
-    Text(
-      text = "Registro guardado en SQLite con estados, costos y reenvío por WhatsApp.",
-      style = MaterialTheme.typography.bodySmall,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Spacer(Modifier.height(10.dp))
-
-    if (filtered.isNotEmpty()) {
-      Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(top = 8.dp, bottom = 6.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Column {
+        Text(
+          text = "Pedidos",
+          style = MaterialTheme.typography.titleLarge,
+          fontWeight = FontWeight.Bold,
+        )
+        val totalBultos = filtered.sumOf { it.totalCantidad }
+        Text(
+          text = if (filtered.isEmpty()) "Sin pedidos en este filtro"
+          else "${filtered.size} pedido(s) · ${PriceParser.formatQuantity(totalBultos)} ítems",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      if (totalAcumulado != null) {
+        Surface(
+          color = MaterialTheme.colorScheme.primaryContainer,
+          shape = RoundedCornerShape(10.dp),
         ) {
-          Column {
+          Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            horizontalAlignment = Alignment.End,
+          ) {
             Text(
-              text = "${filtered.size} pedido(s) registrados",
+              text = "Total est.",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+            )
+            Text(
+              text = PriceParser.formatCurrency(totalAcumulado),
               style = MaterialTheme.typography.labelLarge,
+              fontWeight = FontWeight.Bold,
               color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
-            val totalBultos = filtered.sumOf { it.totalCantidad }
-            Text(
-              text = "Cantidad total: ${PriceParser.formatQuantity(totalBultos)}",
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
-            )
-          }
-          if (totalAcumulado != null) {
-            Column(horizontalAlignment = Alignment.End) {
-              Text(
-                text = "Costo acumulado",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
-              )
-              Text(
-                text = PriceParser.formatCurrency(totalAcumulado),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-              )
-            }
           }
         }
       }
-      Spacer(Modifier.height(10.dp))
     }
 
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
       item {
         FilterChip(
           selected = selectedFilter == null,
@@ -146,7 +133,7 @@ fun HistorialPedidosScreen(
       }
     }
 
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(6.dp))
 
     if (filtered.isEmpty()) {
       Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

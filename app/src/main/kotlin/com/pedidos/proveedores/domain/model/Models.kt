@@ -5,7 +5,26 @@ enum class CatalogoFormato(val etiqueta: String, val extension: String) {
   XLSX("Excel", "xlsx"),
   CSV("CSV", "csv"),
   IMAGEN("Imágenes", "jpg"),
+  TEXTO("Texto WhatsApp", "txt"),
 }
+
+enum class ModoImportacionCatalogo(val etiqueta: String, val descripcion: String) {
+  ACTUALIZAR_Y_AGREGAR(
+    "Actualizar precios y agregar nuevos",
+    "Actualiza el costo de productos existentes sin duplicar ni borrar los demás del proveedor",
+  ),
+  REEMPLAZAR_TODO(
+    "Reemplazar todo el catálogo",
+    "Sustituye la lista completa de productos de este proveedor (conservando vínculos e historial)",
+  ),
+}
+
+data class CatalogImportSaveResult(
+  val catalogoId: Long,
+  val updatedCount: Int,
+  val insertedCount: Int,
+  val unlinkedCount: Int,
+)
 
 enum class MonedaCatalogo(val codigo: String, val etiqueta: String, val simbolo: String) {
   USD("USD", "USD ($)", "$"),
@@ -141,6 +160,9 @@ data class ResultadoImportacion(
   val productos: List<ProductoImportado>,
   val advertencia: String? = null,
   val metodoExtraccion: String = "Local (offline)",
+  val monedaSugerida: MonedaCatalogo? = null,
+  val modoIvaSugerido: ModoIvaCatalogo? = null,
+  val textoOriginal: String? = null,
 )
 
 data class PedidoItem(

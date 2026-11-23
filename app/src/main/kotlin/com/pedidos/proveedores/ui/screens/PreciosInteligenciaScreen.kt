@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -188,132 +187,94 @@ fun PreciosInteligenciaScreen(
 
   LazyColumn(
     modifier = modifier.fillMaxSize(),
-    contentPadding = PaddingValues(bottom = 28.dp),
-    verticalArrangement = Arrangement.spacedBy(10.dp),
+    contentPadding = PaddingValues(bottom = 20.dp),
+    verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    // Hero compacto 100% Compras a Proveedores
+    // Hero ultracompacto: fila BCV + 3 KPIs que actúan directamente como pestañas activas (ahorra ~130.dp)
     item {
       Box(
         modifier = Modifier
           .fillMaxWidth()
           .background(heroBrush)
-          .padding(horizontal = 16.dp, vertical = 14.dp),
+          .padding(horizontal = 12.dp, vertical = 10.dp),
       ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
           Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
           ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text(
-                text = "Compras a Proveedores",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-              )
-              Text(
-                text = "Compara listas de vendedores, detecta subidas y reparte tu pedido al más barato",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.White.copy(alpha = 0.82f),
-              )
-            }
-            Spacer(Modifier.width(8.dp))
-            Surface(
-              color = Color.White.copy(alpha = 0.16f),
-              shape = RoundedCornerShape(10.dp),
-              modifier = Modifier.clickable { showSettingsDialog = true },
-            ) {
-              Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-              ) {
-                Icon(Icons.Rounded.Tune, contentDescription = "Configurar", tint = Color.White, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(5.dp))
-                Text(
-                  text = "Ajustes",
-                  style = MaterialTheme.typography.labelMedium,
-                  color = Color.White,
-                  fontWeight = FontWeight.SemiBold,
-                )
-              }
-            }
-          }
-
-          // Barra de Tasa BCV (para listas en Bolívares)
-          Surface(
-            color = Color.White.copy(alpha = 0.14f),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-          ) {
+            Text(
+              text = "Compras",
+              style = MaterialTheme.typography.titleLarge,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+            )
             Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-              Column(
-                modifier = Modifier
-                  .weight(1f)
-                  .clickable { showSettingsDialog = true },
+              Surface(
+                color = Color.White.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.clickable(enabled = !bcvRefreshing, onClick = onFetchBcvRate),
               ) {
-                val rateLabel = if (pricingSettings.hasValidExchangeRate) {
-                  "Tasa: Bs. ${"%.2f".format(Locale.US, pricingSettings.tasaBsPorUsd)} / USD"
-                } else {
-                  "Tasa Bs/USD sin configurar"
-                }
-                Text(
-                  text = rateLabel,
-                  style = MaterialTheme.typography.labelLarge,
-                  color = Color.White,
-                  fontWeight = FontWeight.SemiBold,
-                )
-                val sourceInfo = pricingSettings.tasaSourceLabel.ifBlank { "Para comparar listas en Bs. vs. USD" }
-                Text(
-                  text = sourceInfo,
-                  style = MaterialTheme.typography.labelSmall,
-                  color = Color.White.copy(alpha = 0.78f),
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis,
-                )
-              }
-              TextButton(
-                onClick = onFetchBcvRate,
-                enabled = !bcvRefreshing,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-              ) {
-                if (bcvRefreshing) {
-                  CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp,
+                Row(
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  if (bcvRefreshing) {
+                    CircularProgressIndicator(
+                      modifier = Modifier.size(12.dp),
+                      strokeWidth = 2.dp,
+                      color = Color.White,
+                    )
+                  } else {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Actualizar BCV", tint = Color.White, modifier = Modifier.size(14.dp))
+                  }
+                  Spacer(Modifier.width(4.dp))
+                  Text(
+                    text = if (pricingSettings.hasValidExchangeRate) {
+                      "Bs ${"%.2f".format(Locale.US, pricingSettings.tasaBsPorUsd)}"
+                    } else {
+                      "Tasa BCV"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
                     color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
                   )
-                } else {
-                  Icon(Icons.Rounded.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                 }
-                Spacer(Modifier.width(4.dp))
-                Text("BCV hoy", color = Color.White, style = MaterialTheme.typography.labelMedium)
+              }
+              Surface(
+                color = Color.White.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.clickable { showSettingsDialog = true },
+              ) {
+                Box(modifier = Modifier.padding(6.dp), contentAlignment = Alignment.Center) {
+                  Icon(Icons.Rounded.Tune, contentDescription = "Ajustes", tint = Color.White, modifier = Modifier.size(17.dp))
+                }
               }
             }
           }
 
-          // 3 KPIs puros de compras a proveedores
+          // Los 3 KPIs sirven directo como selector de sub-vista (sin fila duplicada de chips)
           Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
           ) {
             PricingHeroKpi(
               value = summary.comparisons.size.toString(),
-              label = "Comparables",
+              label = "Comparador",
               accent = Color(0xFF7DD3FC),
+              selected = selectedSubTab == SUBTAB_COMPARADOR,
               onClick = { selectedSubTab = SUBTAB_COMPARADOR },
               modifier = Modifier.weight(1f),
             )
             PricingHeroKpi(
-              value = totalSubidas.toString(),
-              label = "Subidas costo",
+              value = summary.priceChanges.size.toString(),
+              label = if (totalSubidas > 0) "Subidas ($totalSubidas)" else "Cambios",
               accent = if (totalSubidas > 0) Color(0xFFFCD34D) else Color(0xFF6EE7B7),
+              selected = selectedSubTab == SUBTAB_SUBIDAS,
               onClick = { selectedSubTab = SUBTAB_SUBIDAS },
               modifier = Modifier.weight(1f),
             )
@@ -321,6 +282,7 @@ fun PreciosInteligenciaScreen(
               value = optimalPlan.lines.size.toString(),
               label = "Pedido óptimo",
               accent = Color(0xFF6EE7B7),
+              selected = selectedSubTab == SUBTAB_OPTIMO,
               onClick = { selectedSubTab = SUBTAB_OPTIMO },
               modifier = Modifier.weight(1f),
             )
@@ -333,20 +295,20 @@ fun PreciosInteligenciaScreen(
       item {
         Surface(
           color = LowStockAmber.copy(alpha = 0.14f),
-          shape = RoundedCornerShape(12.dp),
+          shape = RoundedCornerShape(10.dp),
           border = BorderStroke(1.dp, LowStockAmber.copy(alpha = 0.5f)),
           modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 12.dp),
         ) {
           Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
           ) {
-            Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = LowStockAmber, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = LowStockAmber, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
             Text(
-              text = "${summary.missingRateOffersCount} producto(s) de listas en Bolívares esperan tasa Bs/USD.",
+              text = "${summary.missingRateOffersCount} ítem(s) en Bs. esperan tasa BCV.",
               style = MaterialTheme.typography.bodySmall,
               modifier = Modifier.weight(1f),
             )
@@ -358,47 +320,17 @@ fun PreciosInteligenciaScreen(
       }
     }
 
-    // 3 sub-pestañas 100% enfocadas en compras a proveedores
-    item {
-      LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        item {
-          FilterChip(
-            selected = selectedSubTab == SUBTAB_COMPARADOR,
-            onClick = { selectedSubTab = SUBTAB_COMPARADOR },
-            label = { Text("Comparador (${summary.comparisons.size})") },
-          )
-        }
-        item {
-          FilterChip(
-            selected = selectedSubTab == SUBTAB_SUBIDAS,
-            onClick = { selectedSubTab = SUBTAB_SUBIDAS },
-            label = { Text("Subidas (${summary.priceChanges.size})") },
-          )
-        }
-        item {
-          FilterChip(
-            selected = selectedSubTab == SUBTAB_OPTIMO,
-            onClick = { selectedSubTab = SUBTAB_OPTIMO },
-            label = { Text("Pedido Óptimo (${optimalPlan.lines.size})") },
-          )
-        }
-      }
-    }
-
-    // Buscador común
+    // Buscador compacto
     item {
       OutlinedTextField(
         value = searchQuery,
         onValueChange = { searchQuery = it },
         placeholder = { Text("Buscar producto, código o proveedor...") },
-        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+        leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
         trailingIcon = {
           if (searchQuery.isNotBlank()) {
             IconButton(onClick = { searchQuery = "" }) {
-              Icon(Icons.Rounded.Close, contentDescription = "Limpiar")
+              Icon(Icons.Rounded.Close, contentDescription = "Limpiar", modifier = Modifier.size(18.dp))
             }
           }
         },
@@ -406,7 +338,7 @@ fun PreciosInteligenciaScreen(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 16.dp),
+          .padding(horizontal = 12.dp),
       )
     }
 
@@ -657,16 +589,18 @@ private fun PricingHeroKpi(
   value: String,
   label: String,
   accent: Color,
+  selected: Boolean,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   Surface(
-    color = Color.White.copy(alpha = 0.13f),
+    color = if (selected) Color.White.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.11f),
+    border = if (selected) BorderStroke(1.5.dp, Color.White.copy(alpha = 0.85f)) else null,
     shape = RoundedCornerShape(10.dp),
     modifier = modifier.clickable(onClick = onClick),
   ) {
     Column(
-      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
       horizontalAlignment = Alignment.Start,
     ) {
       Text(
@@ -678,7 +612,8 @@ private fun PricingHeroKpi(
       Text(
         text = label,
         style = MaterialTheme.typography.labelSmall,
-        color = Color.White.copy(alpha = 0.85f),
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        color = Color.White.copy(alpha = if (selected) 1f else 0.82f),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
